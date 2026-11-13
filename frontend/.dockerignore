@@ -1,7 +1,12 @@
 node_modules
 dist
+coverage
 .env
 .env.*
 !.env.example
 npm-debug.log*
+*.log
 .git
+README.md
+cambios.md
+desarollo.md

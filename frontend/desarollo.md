@@ -15,8 +15,8 @@ Bitácora técnica de la interfaz web. Se actualiza al finalizar cada fase.
 |------|-------------|--------|
 | 1 | CORS en el backend | ✅ Completada (2026-11-13) |
 | 2 | Inicialización y diseño del frontend | ✅ Completada (2026-11-13) |
-| 3 | Dockerización (Node + Nginx) | ⏳ Pendiente |
-| 4 | Verificación end-to-end y cierre documental | ⏳ Pendiente |
+| 3 | Dockerización (Node + Nginx) | ✅ Completada (2026-11-13) |
+| 4 | Verificación end-to-end y cierre documental | ✅ Completada (2026-11-13) |
 
 ## Fase 1 — CORS en el backend
 
@@ -65,7 +65,9 @@ frontend/
 │   └── vite-env.d.ts
 ├── .dockerignore
 ├── .env.example
+├── Dockerfile
 ├── index.html
+├── nginx.conf
 ├── package.json
 ├── package-lock.json
 ├── tsconfig.json
@@ -106,18 +108,27 @@ frontend/
 ### Validaciones realizadas
 
 ```powershell
-docker run --rm -v "C:/dev/proyecto-clinica-benitez/frontend:/app" -w /app node:20-alpine sh -c "npm install && npm run build"
+docker build -f "%TEMP%\opencode\frontend-build.Dockerfile" -t clinica-frontend-build-test frontend
 ```
+
+Ese build limpio equivale al escenario real de Fase 3: `npm ci` + `npm run build` dentro de
+Node 20, sin reutilizar `node_modules` del host.
 
 Resultado:
 
-- `npm install`: 179 paquetes, 0 vulnerabilidades.
+- `npm ci`: 182 paquetes, 0 vulnerabilidades.
 - `tsc --noEmit`: OK.
 - `vite build`: OK.
   - `dist/index.html` 0.64 kB.
-  - CSS 35.00 kB (gzip 6.88 kB).
-  - JS 410.08 kB (gzip 126.40 kB).
+  - CSS 35.03 kB (gzip 6.89 kB).
+  - JS 410.21 kB (gzip 126.47 kB).
   - 289 módulos transformados.
+
+**Incidencia de build incremental:** al reutilizar `node_modules` montado desde Windows, el
+build falló con `EIO` al intentar eliminar binarios nativos de `lightningcss` y con
+`node.exe: not found` en `.bin/tsc`. No es un problema del código: el `node_modules` nativo
+no es portable entre Windows y el contenedor Linux. Se resolvió validando con un build limpio
+en Docker, que es además el flujo definitivo de Fase 3.
 
 **Prueba de servidor de desarrollo:**
 
@@ -138,6 +149,35 @@ docker run -d --rm --name clinica-frontend-dev -p 5173:5173 `
 > El build se validó dentro de `node:20-alpine`; el `Dockerfile` multi-etapa se implementa en
 > la Fase 3.
 
+### Ajuste A.1 — Aislamiento de escenarios
+
+**Motivo:** los 5 escenarios son pruebas independientes. Si un escenario hereda el historial
+del anterior, el resultado deja de ser válido: por ejemplo, el Escenario 3 (“Quiero saber la
+disponibilidad del servicio”) podría responder usando el contexto de un horario previo en
+lugar de pedir aclaración.
+
+**Implementación:**
+
+- `useChat.send(text, { fresh: true })`:
+  - fuerza `history: []`;
+  - reemplaza los mensajes visibles por el nuevo mensaje del usuario;
+  - actualiza `messagesRef` de forma sincrónica.
+- `App.handleScenario()` llama `send(prompt, { fresh: true })`.
+- `Sidebar` no necesitó cambios: sigue emitiendo el prompt y `App` define el modo limpio.
+
+**Porqué:** la interfaz y el contexto enviado al agente deben coincidir. Limpiar solo el
+historial pero mantener los mensajes visibles mostraría un contexto que el agente ya no tiene.
+
+**Validación E2E (Playwright + Chrome del sistema):**
+
+1. Clic en “Consulta RAG” → request con `historyLength: 0`, respuesta con horarios reales.
+2. Clic en “Consulta ambigua” → request con `historyLength: 0`, respuesta pidiendo
+   aclaración, `secondTools: []`.
+3. `rawJsonVisible: false`.
+4. Único error de consola: `404` de favicon (no funcional).
+
+Resultado: `UI_E2E_OK`.
+
 ### Comandos ejecutados
 
 | Fecha | Comando | Resultado |
@@ -148,18 +188,101 @@ docker run -d --rm --name clinica-frontend-dev -p 5173:5173 `
 | 2026-11-13 | `npm install && npm run build` en Node 20 | ✅ 179 paquetes; typecheck y build OK. |
 | 2026-11-13 | `npm run dev` en Node 20 (puerto 5173) | ✅ HTML servido correctamente. |
 | 2026-11-13 | Chrome headless `--dump-dom` | ✅ Render detectado; estado **Online** con CORS. |
+| 2026-11-13 | Build limpio `npm ci && npm run build` en Docker | ✅ 182 paquetes; build OK. |
+| 2026-11-13 | Playwright E2E: escenarios 1 y 3 | ✅ Ambos `history: []`; el segundo pide aclaración; sin JSON crudo. |
 
-## Fase 3 — Dockerización (pendiente)
+## Fase 3 — Dockerización con Nginx (completada)
 
-Plan:
+### Archivos creados/actualizados
 
-- `frontend/Dockerfile` multi-etapa con `node:20-alpine` y `nginx:alpine`.
-- `nginx.conf` con fallback SPA y cache de assets.
-- Servicio `frontend` en `docker-compose.yml` (`5173:80`, `depends_on: api`).
-- `VITE_API_URL` como build arg.
+| Archivo | Propósito |
+|---------|-----------|
+| `frontend/Dockerfile` | Build multi-etapa: `node:20-alpine` → `nginx:alpine`. |
+| `frontend/nginx.conf` | Sirve estáticos, fallback SPA, cache de assets y gzip. |
+| `frontend/.dockerignore` | Excluye `node_modules`, `dist`, `.env`, documentación y logs del contexto. |
+| `docker-compose.yml` | Servicio `frontend` (`5173:80`, `depends_on` con healthcheck). |
 
-## Fase 4 — Verificación end-to-end (pendiente)
+### Por qué multi-stage con Nginx y no `npm run dev`
 
-- Levantar el stack completo.
-- Verificar `http://localhost:5173`, estado `/health` y los 5 escenarios.
-- Actualizar `README.md` raíz y cerrar documentación.
+`npm run dev` mantiene el servidor de desarrollo de Vite y un proceso Node.js con
+`node_modules` dentro del contenedor. Eso implica:
+
+- imagen y consumo de RAM/CPU innecesarios para servir archivos estáticos;
+- proceso de desarrollo con HMR y websockets que no se necesita en producción;
+- más superficie de ataque y más recursos compitiendo con Ollama y ChromaDB.
+
+El build multi-etapa compila en `node:20-alpine` y descarta esa etapa. La imagen final solo
+contiene `nginx:alpine` y `dist/`, sin Node ni dependencias. En este entorno la imagen final
+pesa **94.3 MB** (base `nginx:alpine` 1.31.8); sigue siendo mucho menor que una imagen Node
+con `node_modules` y no ejecuta JavaScript en el servidor. Si se prioriza aún más el tamaño,
+existe la variante `nginx:alpine-slim`, pero no se aplicó para respetar la indicación de usar
+`nginx:alpine`.
+
+### `VITE_API_URL` en build-time
+
+Vite reemplaza `import.meta.env.VITE_*` durante `npm run build`, no en runtime. Por eso el
+Dockerfile declara en la etapa de build, antes de compilar:
+
+```dockerfile
+ARG VITE_API_URL=http://localhost:8000
+ENV VITE_API_URL=$VITE_API_URL
+```
+
+Y Compose pasa el valor como build arg:
+
+```yaml
+args:
+  VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+```
+
+Consecuencia: cambiar la URL de la API requiere reconstruir la imagen
+(`docker compose up -d --build frontend`); reiniciar el contenedor no alcanza.
+
+### Nginx
+
+- `try_files $uri $uri/ /index.html` permite rutas SPA.
+- `/assets/` con cache inmutable de 1 año.
+- `gzip` para texto, CSS, JS, JSON, XML y SVG.
+- No se configura proxy `/api`: el navegador llama directamente a
+  `http://localhost:8000`, que ya tiene CORS para `http://localhost:5173`. Un proxy evitaría
+  CORS, pero duplicaría la capa de red y no es el diseño acordado.
+- `HEALTHCHECK` con `wget` contra `http://127.0.0.1/` para que Compose muestre `healthy`.
+
+### Un único `docker-compose.yml` en la raíz
+
+Se mantiene un solo archivo en la raíz en lugar de composes separados por carpeta porque:
+
+- permite un ciclo de vida unificado: `docker compose up -d --build`;
+- centraliza logs (`docker compose logs -f`), red y variables;
+- expresa el orden de arranque con `depends_on`;
+- no impide operar un servicio individual (`docker compose up -d api`).
+
+Se usa `depends_on: api: condition: service_healthy` (no la forma corta) para que el
+frontend no quede disponible antes de que el healthcheck de la API esté OK.
+
+### Validación end-to-end
+
+| Prueba | Resultado |
+|--------|-----------|
+| `docker compose config --quiet` | ✅ Sin errores. |
+| `docker compose up -d --build` | ✅ Imágenes construidas y servicios iniciados. |
+| `docker compose ps` | ✅ API y frontend `Up (healthy)`. |
+| `curl -I http://localhost:5173` | ✅ `200`, `Server: nginx/1.31.8`. |
+| Navegador (Playwright + Chrome) | ✅ Interfaz cargada desde Nginx. |
+| Estado `/health` | ✅ **Online** visible. |
+| Consulta RAG | ✅ `POST http://localhost:8000/api/chat`; `buscar_protocolo`; horarios reales. |
+| Historial del escenario | ✅ `history: []`. |
+| Errores CORS | ✅ Ninguno. |
+| Consola del navegador | ✅ Sin errores. |
+| Logs Nginx/API | ✅ `OPTIONS /api/chat` 200, `POST /api/chat` 200, healthchecks 200. |
+| Tamaño imagen frontend | ✅ 94.3 MB. |
+
+Resultado final: `NGINX_E2E_OK`.
+
+## Fase 4 — Verificación end-to-end y cierre (completada)
+
+- Stack completo levantado desde la raíz.
+- Ambos contenedores healthy y verificados por HTTP.
+- Interfaz servida por Nginx, estado Online y consulta real contra el agente.
+- `README.md` raíz y documentos de `frontend/` actualizados.
+- `backend/` mantiene su contrato sin cambios funcionales en esta fase.

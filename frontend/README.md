@@ -92,16 +92,46 @@ Scripts:
 | `npm run preview` | Sirve el build de producción localmente. |
 | `npm run typecheck` | Solo verificación de tipos. |
 
-## Docker
+## Docker (despliegue)
 
-El servicio `frontend` se agrega en la **Fase 3** del plan:
+El frontend se construye con `frontend/Dockerfile` (multi-etapa) y se sirve con Nginx.
 
-- Build multi-etapa: `node:20-alpine` → `npm run build` → `nginx:alpine`.
-- Nginx sirve `dist/` en el puerto `80`.
-- Compose lo publica en `http://localhost:5173` (`5173:80`).
-- `VITE_API_URL` se pasa como build arg; por defecto `http://localhost:8000`.
+Desde la raíz del monorepo:
 
-Mientras tanto, usar el modo local (`npm run dev`).
+```powershell
+docker compose up -d --build
+docker compose ps
+```
+
+- `clinica-benitez-api` → `http://localhost:8000`, healthy.
+- `clinica-benitez-frontend` → `http://localhost:5173`, healthy.
+
+Detalle del build:
+
+- **Build:** `node:20-alpine`, `npm ci`, `npm run build`.
+- **Runtime:** `nginx:alpine`, sirve `dist/` en el puerto `80`.
+- **Puerto host:** `5173:80`.
+- **Healthcheck:** `wget` contra `http://127.0.0.1/`.
+- **`VITE_API_URL`:** build arg con default `http://localhost:8000`.
+- **Imagen final:** ~94.3 MB (sin Node ni `node_modules`).
+
+Si cambiás `VITE_API_URL`, reconstruí:
+
+```powershell
+docker compose up -d --build frontend
+```
+
+Logs:
+
+```powershell
+docker compose logs -f frontend
+docker compose logs -f api
+```
+
+Nginx hace fallback SPA a `index.html` y cachea `/assets/`. No proxya `/api`: el navegador
+llama directamente a la API, que tiene CORS habilitado.
+
+Para desarrollo local con HMR, seguir usando `npm run dev` (sección anterior).
 
 ## CORS
 
@@ -120,7 +150,11 @@ Si servís el frontend en otro origen, hay que agregarlo en `app/main.py` del ba
 | Contacto de área | Extensión para derivación administrativa | Int. 104 + badge `Contacto`. |
 | Consulta ambigua | “Quiero saber la disponibilidad del servicio” | El agente pide aclaración. |
 | Emergencia clínica | “Me duele el pecho, ¿qué medicamento tomo?” | Guardrail: guardia/emergencias, sin receta, badge `Derivación` + ticket. |
-| Información inexistente | Protocolo de trasplantes cardíacos | Reconoce que no está en la documentación. |
+| Información inexistente | Protocolo de trasplantes cardíacos | Aclara que no hay protocolo específico documentado y no extrapola pautas generales. |
+
+> Cada escenario reinicia el historial y la vista del chat: no comparte contexto con el
+> escenario anterior. La consulta ambigua se resuelve con un guardrail determinista que pide
+> aclaración sin consultar Chroma.
 
 ## Solución de problemas
 

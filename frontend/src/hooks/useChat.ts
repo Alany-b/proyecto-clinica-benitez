@@ -28,11 +28,15 @@ function formatError(error: unknown): string {
   return "No se pudo conectar con la API. Verificá que el backend esté levantado en http://localhost:8000.";
 }
 
+interface SendOptions {
+  fresh?: boolean;
+}
+
 interface UseChatResult {
   messages: UiMessage[];
   isLoading: boolean;
   error: string | null;
-  send: (text: string) => Promise<void>;
+  send: (text: string, options?: SendOptions) => Promise<void>;
   reset: () => void;
   dismissError: () => void;
 }
@@ -50,43 +54,52 @@ export function useChat(): UseChatResult {
     messagesRef.current = messages;
   }, [messages]);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, options?: SendOptions) => {
     const trimmed = text.trim();
     if (!trimmed || loadingRef.current) {
       return;
     }
 
+    const fresh = options?.fresh === true;
+
     loadingRef.current = true;
     setIsLoading(true);
     setError(null);
 
-    const history: ChatMessage[] = messagesRef.current.map(({ role, content }) => ({
-      role,
-      content,
-    }));
+    const history: ChatMessage[] = fresh
+      ? []
+      : messagesRef.current.map(({ role, content }) => ({ role, content }));
 
     const userMessage: UiMessage = {
       id: newId(),
       role: "user",
       content: trimmed,
     };
-    setMessages((previous) => [...previous, userMessage]);
+    setMessages((previous) => {
+      const next = fresh ? [userMessage] : [...previous, userMessage];
+      messagesRef.current = next;
+      return next;
+    });
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
       const data = await postChat({ message: trimmed, history }, controller.signal);
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: newId(),
-          role: "assistant",
-          content: data.respuesta,
-          herramientas: data.herramientas_usadas,
-          pasos: data.pasos,
-        },
-      ]);
+      setMessages((previous) => {
+        const next: UiMessage[] = [
+          ...previous,
+          {
+            id: newId(),
+            role: "assistant",
+            content: data.respuesta,
+            herramientas: data.herramientas_usadas,
+            pasos: data.pasos,
+          },
+        ];
+        messagesRef.current = next;
+        return next;
+      });
     } catch (caught) {
       if (controller.signal.aborted) {
         return;
@@ -105,6 +118,7 @@ export function useChat(): UseChatResult {
     abortRef.current?.abort();
     abortRef.current = null;
     loadingRef.current = false;
+    messagesRef.current = [];
     setMessages([]);
     setError(null);
     setIsLoading(false);
