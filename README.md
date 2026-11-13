@@ -1,4 +1,6 @@
 # Clínica Benitez — Monorepo
+##  Integrantes : Recalde  Alejandro , Ybars Alan , Ruiz Diaz Ruben
+
 
 Sistema de asistencia administrativa para la Clínica Benitez:
 
