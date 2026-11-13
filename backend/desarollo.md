@@ -664,6 +664,140 @@ También se verificó `GET /health` con `Origin: http://localhost:5173` → 200 
 
 **Estado:** ✅ reorganización completada sin pérdida del índice ni cambios de contrato.
 
+### Ajustes pre-despliegue — Parte A (2026-11-13)
+
+#### A.2 — Fallback de tool calls embebidas en texto
+
+**Problema:** `llama3.1:8b` ocasionalmente emite la intención de llamar una tool como JSON
+dentro de `content` (`{"name": "...", "parameters": {...}}`) en lugar de poblar
+`response.tool_calls`. El ciclo de herramientas no se ejecutaba y el usuario veía JSON crudo.
+
+**Solución aplicada en `app/agent/core.py`:**
+
+- `_extract_json_object()`: extrae el primer objeto JSON válido, incluso dentro de bloques
+  Markdown o texto adicional, respetando strings y llaves anidadas.
+- `_parse_text_tool_call()`: valida que `name` exista en `TOOL_MAP` y acepta
+  `parameters` o `arguments` (objeto o string JSON).
+- Si el JSON es válido y la tool existe:
+  - se reemplaza el `AIMessage` crudo por uno con `tool_calls` estructurado;
+  - se ejecuta la tool y se agrega el `ToolMessage` con el resultado;
+  - el modelo vuelve a invocarse para redactar la respuesta final.
+- Si el texto **parece** un intento de tool call (`{` + `"name"`/`"parameters"`/
+  `"arguments"`) pero no se puede interpretar, se devuelve un mensaje seguro:
+  “No encontré información institucional sobre esa consulta o no pude procesarla
+  correctamente. ¿Podrías reformularla?”.
+- No se agregaron dependencias: solo `json` y `uuid` de la librería estándar.
+
+**Porqué:** mantiene el diseño de `bind_tools` sin depender de que el modelo respete siempre
+el formato estructurado. El reemplazo del mensaje crudo evita que el modelo repita el JSON y
+garantiza que la interfaz nunca lo muestre.
+
+**Pruebas (agente simulado, sin depender del modelo):**
+
+| Caso | Resultado |
+|------|-----------|
+| JSON válido con `parameters` | ✅ Ejecuta `buscar_protocolo`; 2 invocaciones; `ToolMessage` con documentación. |
+| JSON válido con `arguments` string | ✅ Ejecuta `consultar_contacto_area`; respuesta final. |
+| Tool desconocida | ✅ Mensaje seguro; no ejecuta tools; sin JSON. |
+| JSON malformado | ✅ Mensaje seguro; no ejecuta tools; sin JSON. |
+
+#### A.3 — Blindaje de contactos y saludos en el `Modelfile`
+
+**Cambios:**
+
+- Prohibición explícita de inventar teléfonos, internos, correos, horarios o contactos fuera
+  de `consultar_contacto_area` / `buscar_protocolo`.
+- Regla para responder saludos simples, despedidas y preguntas de identidad sin invocar
+  herramientas.
+- Criterios 10 y 11 de autoevaluación para contactos y saludos.
+
+**Recompilación:**
+
+```powershell
+ollama create agente-clinica -f backend/Modelfile
+```
+
+Resultado: `success` (reutiliza las capas de `llama3.1:8b`).
+
+**Hallazgo durante la validación:** el prompt por sí solo no impidió que “Hola” disparara
+`buscar_protocolo`. Por eso se agregó:
+
+- regla de saludos al `SystemMessage` de operación en `core.py`;
+- bypass determinista para saludos simples (`_GREETING_RE`), con respuesta directa y
+  `pasos=0`;
+- guardrail de ambigüedad (`_is_vague_service_request`) para consultas como “disponibilidad
+  del servicio” u “horario de atención” sin área específica: pide aclaración sin consultar
+  Chroma.
+
+**Porqué:** el requisito institucional prohíbe alucinar contactos y el prompt no era
+suficiente frente a un modelo cuantizado. Los guardrails garantizan el comportamiento y
+reducen latencia/consultas vectoriales innecesarias.
+
+**Pruebas:**
+
+| Consulta | Resultado |
+|----------|-----------|
+| “Hola” / “Buenos días” | ✅ `TOOLS: []`, `PASOS: 0`, respuesta directa. |
+| “¿A qué extensión debo llamar para Auditoría Médica?” | ✅ `consultar_contacto_area`, Int. 220. |
+| “¿Cuál es el teléfono general de la clínica?” | ✅ No inventa teléfono; informa que no está en la documentación. |
+| “Quiero saber la disponibilidad del servicio” | ✅ Pide aclaración, `TOOLS: []`, `PASOS: 0`. |
+| “¿Cuál es el horario de Diagnóstico por Imágenes?” | ✅ `buscar_protocolo`, horarios reales. |
+
+#### Validaciones de la Parte A (backend)
+
+- `docker compose up -d --build api` → API healthy.
+- Fallback simulado: 4/4 casos OK.
+- Recompilación del modelo: `success`.
+- Saludos, contactos, ambigüedad y RAG: OK.
+
+#### A.4 — Prevención de extrapolación en procedimientos no documentados
+
+**Problema observado:** el Escenario 5 (“protocolo para trasplantes cardíacos”) recuperaba
+fragmentos de derivación/traslado generales y el modelo los presentaba como el protocolo del
+trasplante. Además, en “documentación para resonancia magnética” mezclaba pasos de
+autorización de obras sociales con pasos de derivación (cama, ambulancia).
+
+**Porqué importa:** el requisito institucional prohíbe inventar o extrapolar protocolos
+clínicos. Un trasplante cardíaco no está documentado en los PDFs; la respuesta correcta es
+admitirlo y no fabricar un procedimiento. La resonancia sí está documentada, pero solo en la
+sección de autorización de obras sociales.
+
+**Cambios:**
+
+1. `core.py` (`SystemMessage`) y `Modelfile`: regla explícita de no extrapolación y regla
+   positiva para prácticas sí documentadas.
+2. `core.py` fallback: reparación de escapes Unicode inválidos (`\u00i` → `í`, etc.) que el
+   modelo generaba al escribir “cardíacos” y que invalidaban el JSON.
+3. `tools.py` `buscar_protocolo`: filtro por términos específicos.
+   - Si ningún fragmento menciona la especialidad/procedimiento, devuelve una instrucción de
+     “sin protocolo específico”.
+   - Si la consulta es de un procedimiento puntual, prioriza un solo fragmento para evitar
+     mezclar secciones.
+   - Si es una consulta administrativa general (derivación, traslado, obras sociales,
+     auditoría), conserva hasta 4 fragmentos para no perder pasos.
+4. Recompilación del modelo:
+
+```powershell
+ollama create agente-clinica -f backend/Modelfile
+```
+
+**Validaciones:**
+
+| Consulta | Resultado |
+|----------|-----------|
+| Trasplantes cardíacos | ✅ No hay protocolo específico; no extrapola. |
+| Resonancia magnética | ✅ Solo autorización de obras sociales/auditoría. |
+| Derivación administrativa | ✅ 5 pasos completos. |
+| Horario de imágenes | ✅ Sin regresión. |
+| Extensión de Auditoría Médica | ✅ Sin regresión. |
+| Emergencia de pecho | ✅ Sin regresión. |
+| “Hola” | ✅ Sin regresión. |
+
+**Decisión de diseño:** la regla en el prompt se complementa con el filtro de recuperación.
+El prompt por sí solo no impedía que el modelo mezclara fragmentos solapados; el filtro
+garantiza que, si no hay evidencia específica, el agente no reciba pasos generales como si
+fueran el protocolo consultado.
+
 ## Comandos ejecutados
 
 | Fecha | Comando | Resultado |
@@ -731,6 +865,14 @@ También se verificó `GET /health` con `Origin: http://localhost:5173` → 200 
 | 2026-11-13 | `docker compose up -d --build` (monorepo) | ✅ API `Up (healthy)`; `/health` OK. |
 | 2026-11-13 | `DOCS: 7` tras mover `vector_store` | ✅ Índice Chroma intacto. |
 | 2026-11-13 | `POST /api/chat` tras reorganización | ✅ 200; `buscar_protocolo`; horarios reales. |
+| 2026-11-13 | `ollama create agente-clinica -f backend/Modelfile` | ✅ Prompt endurecido recompilado (`success`). |
+| 2026-11-13 | Test simulado de fallback (4 casos) | ✅ Tool calls embebidas, tool desconocida y JSON inválido. |
+| 2026-11-13 | `run_agent` saludos/contactos/ambigüedad | ✅ Sin tools en saludos, Int. 220 real, aclaración en consulta vaga. |
+| 2026-11-13 | `docker compose up -d --build api` | ✅ API healthy con fallback y guardrails. |
+| 2026-11-13 | Regla de no extrapolación en `Modelfile` + `SystemMessage` | ✅ Recompilado con `ollama create` (`success`). |
+| 2026-11-13 | Reparación de escapes Unicode inválidos en fallback | ✅ `\u00i` → `í`; el JSON de trasplantes se parsea. |
+| 2026-11-13 | Filtro de relevancia en `buscar_protocolo` | ✅ Sin protocolo específico para trasplantes; resonancia sin mezclar derivación. |
+| 2026-11-13 | Regresión: horario, contacto, emergencia y saludo | ✅ Todos sin cambios. |
 
 ## Librerías instaladas (requirements.txt)
 

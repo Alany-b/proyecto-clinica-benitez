@@ -36,6 +36,42 @@ _STOPWORDS = {
     "un", "una", "unas", "uno", "unos", "usted", "ustedes", "y", "ya",
 }
 
+_GENERIC_QUERY_TERMS = {
+    "protocolo", "protocolos", "procedimiento", "procedimientos",
+    "consulta", "consultas", "informacion", "documentacion", "necesito",
+    "quiero", "saber", "servicio", "servicios", "area", "areas", "clinica",
+    "benitez", "realiza", "realizan", "atienden", "tienen", "tiene", "hay",
+    "puedo", "puede", "debo", "debe", "cual", "cuales", "como", "sobre",
+    "tema", "general", "generales", "pasa", "extensions", "extension",
+}
+
+_NO_SPECIFIC_PROTOCOL = (
+    "No encontré un protocolo específico documentado para la especialidad o "
+    "procedimiento consultado. La Clínica Benitez no cuenta con un protocolo "
+    "específico para ese procedimiento en la documentación disponible. No "
+    "presentes pautas generales como si fueran su protocolo. Si corresponde, "
+    "podés ofrecer una derivación administrativa general."
+)
+
+_ADMIN_PROCEDURE_TERMS = {
+    "derivacion",
+    "derivaciones",
+    "traslado",
+    "traslados",
+    "administrativa",
+    "administrativo",
+    "internacion",
+    "alta",
+    "obras",
+    "sociales",
+    "autorizacion",
+    "auditoria",
+    "facturacion",
+    "egresos",
+    "cama",
+    "ambulancia",
+}
+
 _CONTACTOS: dict[str, dict[str, str]] = {
     "gestion de pacientes": {
         "area": "Gestión de Pacientes",
@@ -114,6 +150,15 @@ def _token_weight(token: str) -> float:
     if len(token) >= 9:
         return 1.5
     return 1.0
+
+
+def _specific_query_terms(query: str) -> list[str]:
+    """Términos que identifican una especialidad o procedimiento concreto."""
+    return [
+        token
+        for token in _tokenize(query)
+        if token not in _GENERIC_QUERY_TERMS
+    ]
 
 
 def _lexical_search(query: str, limit: int = _LEXICAL_LIMIT) -> list[Document]:
@@ -197,6 +242,26 @@ def buscar_protocolo(
         return "Error: la consulta de búsqueda no puede estar vacía."
 
     documents = hybrid_search(query.strip())
+    specific_terms = _specific_query_terms(query)
+
+    if specific_terms:
+        scored: list[tuple[int, Document]] = []
+        for document in documents:
+            normalized = _normalize(document.page_content)
+            matches = sum(1 for term in specific_terms if term in normalized)
+            if matches:
+                scored.append((matches, document))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if any(term in _ADMIN_PROCEDURE_TERMS for term in specific_terms):
+            documents = [document for _, document in scored][:4]
+        else:
+            documents = [document for _, document in scored][:1]
+
+        if not documents:
+            return _NO_SPECIFIC_PROTOCOL
+    else:
+        documents = documents[:4]
+
     if not documents:
         return (
             "No encontré información en la documentación institucional para esa "

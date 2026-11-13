@@ -331,6 +331,16 @@ docker compose up -d
   - `derivar_solicitud(motivo, area)`: ticket de derivación simulado.
 - **Guardrails:** emergencia primero, sin diagnósticos/medicamentos, ticket visible y
   prohibición de inventar datos.
+- **Contactos:** teléfonos, internos y correos solo se informan si provienen de
+  `consultar_contacto_area` o `buscar_protocolo`; el prompt prohíbe inventarlos.
+- **Fallback de tool calls:** si el modelo emite un JSON con `name` + `parameters`/`arguments`
+  en texto plano, se ejecuta la tool programáticamente. Si el JSON es inválido o la tool no
+  existe, se devuelve un mensaje seguro sin exponer el JSON.
+- **Saludos y ambigüedad:** los saludos simples no consultan Chroma; las consultas de
+  disponibilidad sin área específica piden aclaración.
+- **No extrapolación:** si ningún fragmento menciona la especialidad/procedimiento, el agente
+  aclara que no hay protocolo específico documentado y no aplica pasos generales como si
+  fueran el protocolo consultado.
 
 ---
 
