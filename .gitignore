@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+backend/.env
+
+# Persistencia local de Chroma (se regenera indexando los PDFs)
+backend/vector_store/*
+!backend/vector_store/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# Editores y logs
+.idea/
+.vscode/
+*.log
+.DS_Store

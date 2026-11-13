@@ -1,0 +1,21 @@
+services:
+  api:
+    build: ./backend
+    image: clinica-benitez-api:latest
+    container_name: clinica-benitez-api
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-agente-clinica}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      DATA_DIR: /code/data
+      CHROMA_PERSIST_DIR: /code/vector_store
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-protocolos_clinica}
+    volumes:
+      - ./backend/data:/code/data
+      - ./backend/vector_store:/code/vector_store
+    extra_hosts:
+      # Permite resolver host.docker.internal en Linux (en Docker Desktop ya existe).
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
