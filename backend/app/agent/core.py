@@ -76,6 +76,15 @@ _TOOL_TEXT_FALLBACK = (
     "procesarla correctamente. ¿Podrías reformularla?"
 )
 
+_NO_PROTOCOL_PREFIX = "No encontré un protocolo específico documentado"
+
+_NO_PROTOCOL_ANSWER = (
+    "No encontré un protocolo específico documentado para ese procedimiento en la "
+    "Clínica Benitez. La documentación disponible no contiene pautas específicas "
+    "para ese caso. Si necesitás, puedo registrar una derivación administrativa "
+    "para que lo evalúe el área correspondiente."
+)
+
 _GREETING_RE = re.compile(
     r"^(hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|hey|qu[eé]\s+tal)[!. ]*$",
     re.IGNORECASE,
@@ -164,6 +173,13 @@ def _is_vague_service_request(message: str) -> bool:
     if not any(term in normalized for term in _AMBIGUITY_TERMS):
         return False
     return not any(term in normalized for term in _SERVICE_HINTS)
+
+
+def _apply_no_protocol_guard(answer: str, no_specific_protocol: bool) -> str:
+    """Garantiza que la respuesta mencione la ausencia de protocolo específico."""
+    if no_specific_protocol and "protocolo especifico" not in _normalize_text(answer):
+        return _NO_PROTOCOL_ANSWER
+    return answer
 
 
 def _apply_safety_guards(
@@ -397,6 +413,7 @@ def run_agent(
     agent = get_agent()
     tools_used: list[str] = []
     tool_results: list[str] = []
+    no_specific_protocol = False
 
     for step in range(1, MAX_TOOL_ROUNDS + 1):
         response = agent.invoke(messages)
@@ -437,6 +454,7 @@ def run_agent(
                     "No pude generar una respuesta. ¿Podés reformular la consulta "
                     "con un poco más de detalle?"
                 )
+            answer = _apply_no_protocol_guard(answer, no_specific_protocol)
             answer = _apply_safety_guards(message, answer, tool_results)
             return AgentResult(
                 respuesta=answer,
@@ -460,16 +478,20 @@ def run_agent(
                     logger.exception("Error ejecutando la herramienta %s", name)
                     result = f"Error al ejecutar la herramienta '{name}': {exc}"
 
-            tool_results.append(str(result))
+            result_text = str(result)
+            if result_text.startswith(_NO_PROTOCOL_PREFIX):
+                no_specific_protocol = True
+            tool_results.append(result_text)
             messages.append(
                 ToolMessage(
-                    content=str(result),
+                    content=result_text,
                     tool_call_id=str(call.get("id") or name),
                 )
             )
 
     logger.warning("Se agotaron las %d rondas de herramientas", MAX_TOOL_ROUNDS)
     answer = _final_answer_without_tools(messages)
+    answer = _apply_no_protocol_guard(answer, no_specific_protocol)
     answer = _apply_safety_guards(message, answer, tool_results)
     return AgentResult(
         respuesta=answer,

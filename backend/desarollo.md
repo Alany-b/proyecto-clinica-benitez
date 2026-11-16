@@ -781,6 +781,10 @@ sección de autorización de obras sociales.
 ollama create agente-clinica -f backend/Modelfile
 ```
 
+5. Guardrail determinista: si `buscar_protocolo` devuelve la instrucción de “sin protocolo
+   específico” y la respuesta final no lo menciona, se reemplaza por un mensaje explícito
+   que aclara la ausencia de protocolo documentado y ofrece una derivación.
+
 **Validaciones:**
 
 | Consulta | Resultado |

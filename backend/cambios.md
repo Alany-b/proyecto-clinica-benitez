@@ -33,6 +33,10 @@ del procedimiento. Eso viola la regla institucional de no inventar ni extrapolar
    los menciona, prioriza el fragmento más relevante para evitar mezclar secciones
    (autorización de prácticas vs. derivación/traslado). Para consultas administrativas
    generales de derivación se conservan varios fragmentos para no perder pasos.
+5. **Guardrail determinista de respuesta:** si la tool devuelve la instrucción de “sin
+   protocolo específico” y el modelo final no menciona esa ausencia, la respuesta se
+   reemplaza por un mensaje explícito que aclara que no hay protocolo documentado para el
+   procedimiento y ofrece una derivación administrativa.
 
 **Recompilación:**
 
