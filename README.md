@@ -10,6 +10,26 @@ Sistema de asistencia administrativa para la Clínica Benitez:
 
 Todo corre de forma local: Ollama en el host y los servicios en contenedores.
 
+## Capacidades del agente
+
+- **RAG proactivo:** la documentación se recupera antes de invocar al modelo; el usuario no
+  depende de que el modelo genere una llamada JSON perfecta.
+- **Contexto multi-turno:** mensajes cortos como “Centro quirúrgico” o “¿Y los sábados?” se
+  combinan con el turno anterior para recuperar la información correcta.
+- **Herramientas:** contacto de áreas y derivación con ticket; la búsqueda documental es
+  interna y no se menciona en la respuesta.
+- **Guardrails:** sin diagnósticos ni recetas, sin contactos inventados, emergencia primero y
+  derivación cuando corresponde.
+
+## Arquitectura de despliegue
+
+- Un único `docker-compose.yml` en la raíz coordina `api` y `frontend`, con red compartida,
+  logs centralizados y orden de arranque mediante healthcheck.
+- El frontend se compila en una etapa `node:20-alpine` y se sirve con `nginx:alpine`; no se
+  ejecuta Vite en producción. `VITE_API_URL` se embebe en build-time.
+- La imagen final no incluye Node ni `node_modules`, por lo que consume menos recursos que un
+  contenedor de desarrollo (~94 MB frente a una imagen Node de ~400 MB).
+
 ## Estructura
 
 ```

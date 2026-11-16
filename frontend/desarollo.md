@@ -286,3 +286,36 @@ Resultado final: `NGINX_E2E_OK`.
 - Interfaz servida por Nginx, estado Online y consulta real contra el agente.
 - `README.md` raíz y documentos de `frontend/` actualizados.
 - `backend/` mantiene su contrato sin cambios funcionales en esta fase.
+
+## Integración con RAG proactivo (2026-11-16)
+
+El backend pasó a recuperar documentación antes de invocar al modelo y a resolver
+seguimientos cortos combinando el turno anterior. El frontend **no necesitó cambios de
+código**: el contrato `POST /api/chat` se mantiene igual.
+
+**Qué cambia para la interfaz:**
+
+- Los escenarios del sidebar siguen enviando `history: []`.
+- Una consulta corta como “Centro quirúrgico” envía el historial previo y el backend la
+  expande para recuperar el contexto.
+- El badge `RAG` sigue apareciendo cuando el backend usa fragmentos documentales.
+- Los badges `Contacto` y `Derivación` se mantienen para las tools expuestas.
+- Las respuestas ya no deben contener nombres de herramientas internas.
+
+**Validación E2E (Playwright + Chrome):**
+
+| Prueba | Resultado |
+|--------|-----------|
+| 5 escenarios del sidebar | ✅ Respuestas correctas, `history: []` en cada uno. |
+| “Horario de atención” | ✅ Pide aclaración. |
+| “Centro quirúrgico” después de la aclaración | ✅ `historyLength: 2`; responde 09:00–15:00. |
+| Badge RAG en consulta de horario | ✅ `buscar_protocolo` registrado. |
+| Badge Derivación en emergencia | ✅ Ticket visible. |
+| Nombres internos en la interfaz | ✅ Ninguno. |
+| Errores de consola/CORS | ✅ Ninguno. |
+
+Resultado: `UI_PROACTIVE_E2E_OK`.
+
+**Porqué no se tocó el frontend:** el backend resolvió la recuperación y el contexto; la
+interfaz ya mostraba `herramientas_usadas` y `pasos`. Mantener el contrato evita romper los
+componentes y permite que el beneficio llegue sin migraciones.

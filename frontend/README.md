@@ -40,9 +40,11 @@ Utilidades:
 
 1. El usuario escribe un mensaje o hace clic en un escenario.
 2. `useChat` arma `history` con los mensajes previos y el `message` actual.
-3. `POST /api/chat` devuelve `respuesta`, `herramientas_usadas` y `pasos`.
-4. El mensaje del asistente se agrega al historial y se renderiza con Markdown.
-5. Los errores `422`/`503` se muestran como alerta en la ventana de chat.
+3. El backend recupera documentación automáticamente antes del modelo y, si el mensaje es
+   corto, lo expande con el turno anterior del usuario.
+4. `POST /api/chat` devuelve `respuesta`, `herramientas_usadas` y `pasos`.
+5. El mensaje del asistente se agrega al historial y se renderiza con Markdown.
+6. Los errores `422`/`503` se muestran como alerta en la ventana de chat.
 
 Ejemplo del payload:
 
@@ -55,6 +57,20 @@ Ejemplo del payload:
   ]
 }
 ```
+
+### Seguimiento conversacional
+
+El backend entiende mensajes cortos usando el turno anterior. Por ejemplo:
+
+```text
+Usuario: Horario de atención
+Asistente: ¿Qué servicio o área te interesa?
+Usuario: Centro quirúrgico
+Asistente: El Centro Quirúrgico atiende de lunes a viernes de 09:00 a 15:00.
+```
+
+El badge `RAG` se muestra cuando el backend usó fragmentos documentales, aunque la búsqueda
+ya no sea una herramienta visible para el modelo.
 
 ## Variables de entorno
 

@@ -7,6 +7,28 @@ Registro cronológico de modificaciones importantes, decisiones e incidencias de
 
 ---
 
+## 2026-11-16 — Integración con RAG proactivo
+
+**Cambio de backend:** la recuperación documental se ejecuta antes del modelo y los
+seguimientos cortos se expanden con el turno anterior. El contrato `POST /api/chat` no cambió.
+
+**Impacto en frontend:** ninguno a nivel de código. Los escenarios siguen enviando
+`history: []`; el seguimiento “Horario de atención” → “Centro quirúrgico” envía historial y el
+backend lo resuelve. Los badges `RAG`, `Contacto` y `Derivación` siguen funcionando.
+
+**Validación E2E:**
+
+- 5 escenarios correctos, con `history: []`.
+- Seguimiento con `historyLength: 2` y respuesta 09:00–15:00.
+- Sin nombres de herramientas internas en la interfaz.
+- Sin errores de consola ni CORS.
+- Resultado: `UI_PROACTIVE_E2E_OK`.
+
+**Porqué no se modificó React:** el backend absorbió la complejidad del RAG proactivo y la
+expansión de contexto; el frontend ya consumía `respuesta`, `herramientas_usadas` y `pasos`.
+
+---
+
 ## 2026-11-13 — Fase 3: Docker + Nginx y orquestación raíz
 
 **Cambio:** se agregó la imagen de producción del frontend y el servicio en Compose.
