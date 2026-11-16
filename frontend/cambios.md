@@ -7,6 +7,67 @@ Registro cronológico de modificaciones importantes, decisiones e incidencias de
 
 ---
 
+## 2026-11-13 — Fase 3: Docker + Nginx y orquestación raíz
+
+**Cambio:** se agregó la imagen de producción del frontend y el servicio en Compose.
+
+- `frontend/Dockerfile` multi-etapa: `node:20-alpine` (build) → `nginx:alpine` (runtime).
+- `frontend/nginx.conf`: estáticos, fallback SPA, cache de `/assets/` y gzip.
+- `frontend/.dockerignore` ampliado.
+- `docker-compose.yml`: servicio `frontend`, `5173:80`, `VITE_API_URL` como build arg y
+  `depends_on` con `condition: service_healthy`.
+
+**Porqué:**
+
+- No se ejecuta `npm run dev` en el contenedor: Node + Vite + `node_modules` consumen
+  recursos y no son necesarios para servir estáticos. Nginx entrega `dist/` con bajo consumo.
+- `VITE_API_URL` se embebe en build-time; por eso `ARG`/`ENV` están antes de
+  `npm run build`. Cambiarla exige reconstruir.
+- Un compose raíz unifica ciclo de vida, red, logs y orden de arranque; el healthcheck de la
+  API evita publicar el frontend antes de que el backend esté listo.
+
+**Validación:**
+
+- Ambos contenedores `Up (healthy)`.
+- `http://localhost:5173` servido por `nginx/1.31.8`, `200`.
+- Estado **Online**, `POST http://localhost:8000/api/chat` con `history: []`, respuesta real
+  y sin errores CORS.
+- Imagen final: 94.3 MB.
+- Resultado: `NGINX_E2E_OK`.
+
+**Nota:** el tamaño real es 94.3 MB (base `nginx:alpine` 1.31.8). Si se busca reducirlo, se
+puede evaluar `nginx:alpine-slim`; no se aplicó para respetar la indicación de `nginx:alpine`.
+
+---
+
+## 2026-11-13 — Aislamiento de escenarios y build limpio
+
+**Cambio:** cada clic en un escenario del sidebar inicia una conversación limpia.
+
+- `useChat.send(text, { fresh: true })` fuerza `history: []`.
+- Se reemplazan los mensajes visibles por el nuevo mensaje del usuario.
+- `App.handleScenario()` usa `fresh: true`; `Sidebar` no cambió.
+
+**Porqué:** las pruebas del sidebar deben ser independientes. Sin esto, el Escenario 3
+(“disponibilidad del servicio”) podía heredar el tema de una consulta anterior y responder
+en vez de pedir aclaración. Limpiar también la vista evita mostrar un contexto que el agente
+ya no recibe.
+
+**Validación E2E (Playwright + Chrome):**
+
+- Escenario 1 → `historyLength: 0`, respuesta con horarios reales.
+- Escenario 3 → `historyLength: 0`, `secondTools: []`, respuesta pidiendo aclaración.
+- `rawJsonVisible: false`.
+- Resultado: `UI_E2E_OK`.
+
+**Incidencia de build:** el build incremental con `node_modules` montado desde Windows falló
+con `EIO` en binarios nativos de `lightningcss` y `node.exe: not found` en `.bin/tsc`. No es
+un error del código: los binarios nativos no son portables entre Windows y Linux. Se validó
+con un build limpio `npm ci && npm run build` dentro de Node 20, que es el flujo real de la
+Fase 3.
+
+---
+
 ## 2026-11-13 — Creación del frontend React + Vite + Tailwind
 
 **Cambio:** se creó la aplicación `frontend/` con:
@@ -39,7 +100,8 @@ docker run --rm -v "C:/dev/proyecto-clinica-benitez/frontend:/app" -w /app node:
 - Servidor de desarrollo en `5173` OK.
 - Render validado con Chrome headless: estado **Online**, escenarios y chat visibles.
 
-**Incidencia:** ninguna. El aviso de nueva versión de npm no afecta el build.
+**Incidencia:** ninguna en el build inicial. La incidencia de `node_modules` montado desde
+Windows se documenta en la sección de aislamiento de escenarios.
 
 ---
 
@@ -69,7 +131,8 @@ el contrato de la API.
 
 ## Riesgos y pendientes
 
-- **Docker del frontend:** `Dockerfile` y servicio `frontend` se agregan en la Fase 3.
+- **Docker del frontend:** completado con build multi-etapa y Nginx; servicio `frontend` en
+  el compose raíz.
 - **`VITE_API_URL`:** se resuelve en build; si cambia, hay que reconstruir la imagen.
 - **CORS:** cualquier origen nuevo debe agregarse en `backend/app/main.py`.
 - **Sin tests automatizados:** la validación actual es typecheck + build + pruebas manuales.

@@ -13,7 +13,7 @@ export default function App() {
 
   function handleScenario(prompt: string) {
     setSidebarOpen(false);
-    void send(prompt);
+    void send(prompt, { fresh: true });
   }
 
   function handleNewChat() {

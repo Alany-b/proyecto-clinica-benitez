@@ -19,3 +19,17 @@ services:
       # Permite resolver host.docker.internal en Linux (en Docker Desktop ya existe).
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    image: clinica-benitez-frontend:latest
+    container_name: clinica-benitez-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

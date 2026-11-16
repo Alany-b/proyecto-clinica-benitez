@@ -9,6 +9,60 @@ interfieren con el plan inicial. Se actualiza a medida que avanza el proyecto.
 
 ---
 
+## 2026-11-13 — Prevención de extrapolación en procedimientos no documentados
+
+**Motivo:** ante “¿Cuál es el protocolo para trasplantes cardíacos?”, el agente recuperaba
+fragmentos sobre traslados/derivaciones generales y los presentaba como si fueran el protocolo
+del procedimiento. Eso viola la regla institucional de no inventar ni extrapolar protocolos.
+
+**Cambios aplicados:**
+
+1. **Regla explícita en el `SystemMessage` de `core.py` y en `Modelfile`:**
+   si los fragmentos hablan de traslados/trámites generales pero no mencionan la especialidad
+   o procedimiento consultado, primero debe aclarar que la Clínica Benitez no cuenta con un
+   protocolo específico documentado para ese procedimiento. Solo después puede mencionar
+   pautas generales de derivación si corresponden.
+2. **Regla positiva complementaria:** si la práctica sí está documentada (por ejemplo,
+   resonancias magnéticas en la autorización de obras sociales), debe usar esos pasos y no
+   responder que falta información.
+3. **Reparación de escapes Unicode inválidos en el fallback parser:** el modelo emitió
+   `\u00i` en “cardíacos”, un JSON inválido que activaba el mensaje seguro y impedía ejecutar
+   la tool. Se normalizan casos como `\u00i/o/u/n` antes de parsear.
+4. **Filtro de relevancia en `buscar_protocolo`:** si ningún fragmento menciona términos
+   específicos de la consulta, devuelve una instrucción de “sin protocolo específico”. Si sí
+   los menciona, prioriza el fragmento más relevante para evitar mezclar secciones
+   (autorización de prácticas vs. derivación/traslado). Para consultas administrativas
+   generales de derivación se conservan varios fragmentos para no perder pasos.
+5. **Guardrail determinista de respuesta:** si la tool devuelve la instrucción de “sin
+   protocolo específico” y el modelo final no menciona esa ausencia, la respuesta se
+   reemplaza por un mensaje explícito que aclara que no hay protocolo documentado para el
+   procedimiento y ofrece una derivación administrativa.
+
+**Recompilación:**
+
+```powershell
+ollama create agente-clinica -f backend/Modelfile
+```
+
+Resultado: `success`.
+
+**Pruebas:**
+
+| Consulta | Resultado |
+|----------|-----------|
+| “Protocolo para trasplantes cardíacos” | ✅ “No hay un protocolo específico para trasplantes cardíacos”; no extrapola pasos. |
+| “Documentación para resonancia magnética” | ✅ Solo pasos de autorización de obras sociales/auditoría; sin mezclar traslado/cama/ambulancia. |
+| “Cómo se gestiona una derivación administrativa” | ✅ Los 5 pasos completos del manual. |
+| Horario de Diagnóstico por Imágenes | ✅ Sin regresión; horarios reales. |
+| Extensión de Auditoría Médica | ✅ Sin regresión; Int. 220. |
+| Emergencia por dolor de pecho | ✅ Sin regresión; derivación y ticket. |
+| “Hola” | ✅ Sin regresión; sin tools. |
+
+**Impacto:** sin cambios en el contrato de la API; mejora la fidelidad documental y evita
+mezclar procedimientos.
+
+---
+
 ## 2026-11-13 — Cambio de modelo base: `deepseek-r1:8b` → `llama3.1:8b`
 
 **Motivo:** `deepseek-r1:8b` no emite tool calls nativos en este entorno, aunque Ollama lo
@@ -142,6 +196,45 @@ teléfono (`(04) 222-3456`) al no tener tools conectadas.
 (`docker info` → OK). Volvió a ocurrir el 2026-11-13 y se resolvió igual.
 
 **Impacto:** ninguno sobre el código; sólo demora operativa.
+
+---
+
+## 2026-11-13 — Ajustes pre-despliegue (Parte A)
+
+### Fallback para tool calls embebidas en texto
+
+**Motivo:** `llama3.1:8b` puede devolver la llamada a una tool como JSON dentro de
+`response.content` en vez de `tool_calls`, exponiendo JSON crudo y sin ejecutar la tool.
+
+**Cambio:** `app/agent/core.py` incorpora:
+
+- extracción robusta de JSON embebido;
+- parseo de `{"name", "parameters"|"arguments"}` solo para tools registradas;
+- reemplazo del mensaje crudo por un `AIMessage` con `tool_calls`;
+- mensaje seguro si el JSON es inválido o la tool es desconocida.
+
+**Validación:** 4/4 casos simulados OK (parameters, arguments string, tool desconocida,
+JSON malformado).
+
+### Blindaje de contactos y saludos
+
+**Motivo:** evitar teléfonos/internos/correos inventados y consultas vectoriales inútiles
+ante saludos.
+
+**Cambio:**
+
+- `Modelfile`: prohibición explícita de inventar contactos y regla de saludos.
+- `core.py`: regla de saludos en el SystemMessage, bypass determinista para saludos simples
+  y guardrail de ambigüedad para “disponibilidad/horario del servicio” sin área específica.
+
+**Validación:**
+
+- “Hola” / “Buenos días” → `TOOLS: []`, `PASOS: 0`.
+- Auditoría Médica → Int. 220 (tool real).
+- “Teléfono general” → no inventa; informa que no está documentado.
+- “Disponibilidad del servicio” → pide aclaración sin consultar Chroma.
+
+**Impacto:** ninguna dependencia nueva; se mantiene el contrato de la API.
 
 ---
 

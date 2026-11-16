@@ -1,80 +1,78 @@
-# Clínica Benitez — API REST + Agente de IA local
+# Backend — Clínica Benitez
 
-Asistente virtual para consultas administrativas de la Clínica Benitez. Combina un agente
-local con **function calling**, un motor **RAG** sobre PDFs institucionales y una **API REST**
-dockerizada. Todo corre en tu equipo: no se envían datos a servicios en la nube.
+API REST y agente de inteligencia artificial local para consultas administrativas de la
+Clínica Benitez. El backend combina **FastAPI**, **LangChain**, **Ollama** y **ChromaDB**,
+y se ejecuta dentro de Docker.
 
----
-
-## ¿En qué consta el proyecto?
-
-El proyecto es un **monolito modular** con tres dominios:
-
-| Dominio | Responsabilidad |
-|---------|-----------------|
-| `app/api` | Capa HTTP: esquemas y endpoint `POST /api/chat`. |
-| `app/agent` | Core del agente, tools y reglas de operación. |
-| `app/rag` | Indexación de PDFs, embeddings y búsqueda en ChromaDB. |
-
-Tecnologías principales:
-
-- **FastAPI + Uvicorn** para la API.
-- **LangChain 1.x** para mensajes, tools y el bucle de tool-calling.
-- **Ollama** como runtime local de modelos.
-- **llama3.1:8b** para generación y tool calling nativo.
-- **nomic-embed-text** para embeddings (768 dimensiones).
-- **ChromaDB** como base vectorial persistente.
-- **Docker / Docker Compose** para empaquetar y ejecutar el servicio.
-
-Flujo de una consulta:
-
-```
-Cliente → POST /api/chat → Agente (llama3.1:8b)
-                              ├─ buscar_protocolo → Chroma (RAG)
-                              ├─ consultar_contacto_area → directorio
-                              └─ derivar_solicitud → ticket
-                         → respuesta final en español
-```
+El frontend es un servicio separado. Este README explica cómo levantar **solo el backend**
+desde la terminal.
 
 ---
 
 ## Requisitos
 
-- **Docker Desktop** instalado y con el motor Linux iniciado.
-- **Ollama** instalado y ejecutándose en el host (`http://localhost:11434`).
-- Espacio en disco: ~10 GB para los modelos.
-- Opcional: `curl` o PowerShell para probar la API.
+- **Docker Desktop** instalado y abierto, con el motor Linux iniciado.
+- **Ollama** instalado y abierto en el equipo.
+- Espacio libre en disco: aproximadamente 10 GB para los modelos.
+- Un navegador web para abrir la documentación de la API.
+- Los PDFs institucionales dentro de `backend/data/`.
 
-> La API corre dentro de Docker y se comunica con Ollama en el host mediante
-> `host.docker.internal:11434`.
+No hace falta instalar Python ni Node en el equipo: todo el backend corre en contenedores.
 
 ---
 
-## Puesta en marcha
+## Antes de empezar: ubicación correcta
 
-### 1. Ubicarse en el proyecto
+Todos los comandos de este README se ejecutan desde la **raíz del proyecto**, no desde la
+carpeta `backend/`, porque el archivo `docker-compose.yml` está en la raíz.
 
 ```powershell
 cd C:\dev\proyecto-clinica-benitez
 ```
 
-### 2. Descargar los modelos en Ollama
+Para comprobar que estás en el lugar correcto:
+
+```powershell
+Get-ChildItem
+```
+
+Debe aparecer `docker-compose.yml` junto a las carpetas `backend` y `frontend`.
+
+---
+
+## Levantar el backend paso a paso
+
+### 1. Abrir Docker Desktop y Ollama
+
+Antes de ejecutar cualquier comando:
+
+1. Abrí **Docker Desktop** y esperá a que el motor termine de iniciar.
+2. Abrí **Ollama** y verificá que esté funcionando.
+
+Podés comprobar Ollama con:
+
+```powershell
+ollama list
+```
+
+Si el comando muestra los modelos instalados, Ollama está disponible.
+
+### 2. Descargar los modelos
+
+Solo es necesario la primera vez:
 
 ```powershell
 ollama pull llama3.1:8b
 ollama pull nomic-embed-text
 ```
 
-Verificar:
-
-```powershell
-ollama list
-```
+- `llama3.1:8b` se usa para generar respuestas y ejecutar herramientas.
+- `nomic-embed-text` se usa para generar los embeddings del RAG.
 
 ### 3. Compilar el modelo del agente
 
-El archivo `backend/Modelfile` parte de `llama3.1:8b`, fija `temperature 0.2` y contiene el
-SYSTEM prompt con las reglas de la clínica:
+El archivo `backend/Modelfile` parte de `llama3.1:8b` y contiene el SYSTEM prompt con las
+reglas de la clínica:
 
 ```powershell
 ollama create agente-clinica -f backend/Modelfile
@@ -86,53 +84,49 @@ Debe finalizar con `success`. Verificar:
 ollama list
 ```
 
-Debe aparecer `agente-clinica:latest`.
+Tiene que aparecer `agente-clinica:latest`.
 
-### 4. Agregar los PDFs institucionales
+### 4. Verificar los PDFs
 
-Copiar los documentos a:
+Los documentos institucionales deben estar en:
 
 ```
 backend/data/
 ```
 
-Actualmente el proyecto incluye:
+Con los documentos actuales, la carpeta contiene:
 
 - `Manual de Procedimientos Administrativos.pdf`
 - `Protocolo de Servicios y Contactos Internos.pdf`
 
-Sin PDFs no se puede construir el índice RAG.
+Sin PDFs no se puede construir el índice de búsqueda.
 
-### 5. Construir y levantar la API
+### 5. Construir y levantar solo el backend
 
 ```powershell
-docker compose up -d --build
+docker compose up -d --build api
 ```
 
-Verificar que el contenedor esté saludable:
+La primera vez puede tardar unos minutos porque descarga la imagen base e instala las
+dependencias. Las siguientes ejecuciones son más rápidas.
+
+Verificar que el contenedor esté activo y saludable:
 
 ```powershell
 docker compose ps
-curl.exe -s http://localhost:8000/health
 ```
 
-Respuesta esperada:
+Debe aparecer el servicio `api` con estado `Up (healthy)` y el puerto `8000` publicado.
 
-```json
-{"status":"ok","service":"clinica-benitez-api"}
-```
+### 6. Indexar los PDFs
 
-Documentación interactiva: <http://localhost:8000/docs>
-
-### 6. Indexar los PDFs en Chroma
-
-La primera vez, o cada vez que agregues/cambies PDFs:
+La primera vez, o cada vez que agregues o cambies documentos:
 
 ```powershell
 docker compose run --rm api python -m app.rag.indexer
 ```
 
-Salida esperada (con los 2 PDFs actuales):
+Salida esperada con los dos PDFs actuales:
 
 ```
 archivos: 2
@@ -142,225 +136,250 @@ coleccion: protocolos_clinica
 persistencia: /code/vector_store
 ```
 
-El índice se guarda en `backend/vector_store` y sobrevive a los reinicios del contenedor.
+El índice queda guardado en `backend/vector_store/` y se conserva al reiniciar el
+contenedor.
+
+### 7. Abrir la API en el navegador
+
+Con el backend levantado:
+
+- Documentación interactiva: <http://localhost:8000/docs>
+- Estado del servicio: <http://localhost:8000/health>
+
+En `/health` deberías ver:
+
+```json
+{"status":"ok","service":"clinica-benitez-api"}
+```
 
 ---
 
-## Probar la API
+## Levantar también el frontend
 
-### Consulta básica
+Si además querés la interfaz web:
 
 ```powershell
-$body = @{
-  message = "¿Cuál es el horario de Diagnóstico por Imágenes?"
-  history = @()
-} | ConvertTo-Json -Depth 5
-
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8000/api/chat `
-  -Body $body `
-  -ContentType "application/json; charset=utf-8"
+docker compose up -d --build
 ```
 
-Respuesta esperada:
+Esto levanta `api` y `frontend`. La interfaz queda disponible en:
+
+<http://localhost:5173>
+
+Para levantar únicamente el frontend, con el backend ya iniciado:
+
+```powershell
+docker compose up -d frontend
+```
+
+---
+
+## Probar la API desde el navegador
+
+No hace falta usar herramientas de línea de comandos para probar la API. La API incluye
+Swagger UI en:
+
+<http://localhost:8000/docs>
+
+Pasos:
+
+1. Abrí `http://localhost:8000/docs`.
+2. Desplegá `POST /api/chat`.
+3. Presioná **Try it out**.
+4. Pegá un cuerpo como el siguiente:
 
 ```json
 {
-  "respuesta": "El horario de Diagnóstico por Imágenes es: Lunes a Viernes 07:00 a 20:00 hs, Sábados 08:00 a 13:00 hs. Ubicación: Subsuelo - Ala Sur.",
-  "herramientas_usadas": ["buscar_protocolo"],
-  "pasos": 2
+  "message": "¿Cuál es el horario de Diagnóstico por Imágenes?",
+  "history": []
 }
 ```
 
-### Con historial de conversación
+5. Presioná **Execute**.
 
-```powershell
-$body = @{
-  message = "¿Y los sábados?"
-  history = @(
-    @{ role = "user"; content = "¿Cuál es el horario de Diagnóstico por Imágenes?" }
-    @{ role = "assistant"; content = "Lunes a viernes de 07:00 a 20:00 hs." }
-  )
-} | ConvertTo-Json -Depth 5
+La respuesta debe incluir `respuesta`, `herramientas_usadas` y `pasos`.
 
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8000/api/chat `
-  -Body $body `
-  -ContentType "application/json; charset=utf-8"
+### Ejemplo con historial
+
+```json
+{
+  "message": "¿Y los sábados?",
+  "history": [
+    {
+      "role": "user",
+      "content": "¿Cuál es el horario de Diagnóstico por Imágenes?"
+    },
+    {
+      "role": "assistant",
+      "content": "Lunes a viernes de 07:00 a 20:00 hs."
+    }
+  ]
+}
 ```
 
 ### Consulta de contacto
 
-```powershell
-$body = @{
-  message = "¿A qué extensión debo llamar para una derivación administrativa?"
-  history = @()
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8000/api/chat `
-  -Body $body `
-  -ContentType "application/json"
+```json
+{
+  "message": "¿A qué extensión debo llamar para una derivación administrativa?",
+  "history": []
+}
 ```
 
-Debe usar `consultar_contacto_area` y devolver el **Int. 104**.
+Debe usar `consultar_contacto_area` y devolver el interno 104.
 
-### Consulta clínica / emergencia
+### Consulta clínica o emergencia
 
-```powershell
-$body = @{
-  message = "Me duele el pecho, ¿qué medicamento tomo?"
-  history = @()
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8000/api/chat `
-  -Body $body `
-  -ContentType "application/json"
+```json
+{
+  "message": "Me duele el pecho, ¿qué medicamento tomo?",
+  "history": []
+}
 ```
 
 Debe:
 
-- No diagnosticar ni recomendar medicamentos.
-- Indicar guardia/servicio de emergencias.
-- Usar `derivar_solicitud` y devolver un ticket.
-
-### Errores esperados
-
-| Caso | HTTP |
-|------|------|
-| `message` vacío | `422` |
-| `role` distinto de `user`/`assistant` | `422` |
-| Ollama o Chroma no disponibles | `503` |
+- no diagnosticar ni recomendar medicamentos;
+- indicar guardia o servicio de emergencias;
+- usar `derivar_solicitud` y devolver un ticket.
 
 ---
 
-## Probar el agente directamente
+## Comandos útiles de terminal
 
-### Desde el contenedor (con tools reales)
-
-```powershell
-docker compose run --rm -T api python -c "from app.agent.core import run_agent; r = run_agent('¿Cuál es el horario de Diagnóstico por Imágenes?'); print(r.respuesta); print('TOOLS:', r.herramientas_usadas)"
-```
-
-Salida esperada:
-
-```
-El horario de Diagnóstico por Imágenes es: ...
-TOOLS: ['buscar_protocolo']
-```
-
-### Desde la consola de Ollama (sin tools)
+### Ver el estado de los servicios
 
 ```powershell
-ollama run agente-clinica
+docker compose ps
 ```
 
-> Importante: `ollama run` **no inyecta las tools**. El modelo solo aplica el rol y las
-> políticas del SYSTEM prompt. Para function calling real usá la API o `run_agent`.
+### Ver los logs del backend
+
+```powershell
+docker compose logs -f api
+```
+
+### Reiniciar el backend
+
+```powershell
+docker compose restart api
+```
+
+### Reconstruir después de cambiar código
+
+```powershell
+docker compose up -d --build api
+```
+
+### Detener el backend
+
+```powershell
+docker compose down
+```
+
+### Reindexar los PDFs
+
+```powershell
+docker compose run --rm api python -m app.rag.indexer
+```
 
 ---
 
-## Estructura del proyecto
+## Estructura del backend
 
 ```
-proyecto-clinica-benitez/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── routes.py        # POST /api/chat
-│   │   │   └── schemas.py       # Request/response Pydantic
-│   │   ├── agent/
-│   │   │   ├── core.py          # ChatOllama + bind_tools + bucle de tools
-│   │   │   └── tools.py         # buscar_protocolo, contactos, derivación
-│   │   ├── rag/
-│   │   │   └── indexer.py       # PDFs → chunks → embeddings → Chroma
-│   │   ├── __init__.py
-│   │   └── main.py              # FastAPI + /health
-│   ├── data/                    # PDFs institucionales
-│   ├── vector_store/            # Persistencia de Chroma
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── .dockerignore
-│   ├── .env.example
-│   ├── Modelfile                # agente-clinica (FROM llama3.1:8b)
-│   ├── desarollo.md             # Bitácora técnica por fases
-│   ├── cambios.md               # Cambios e incidencias relevantes
-│   └── README.md
-├── frontend/                    # React + Vite (Fase 2)
-├── docker-compose.yml           # Servicios api + frontend
-├── .gitignore
+backend/
+├── app/
+│   ├── api/
+│   │   ├── routes.py        # Endpoint POST /api/chat
+│   │   └── schemas.py       # Esquemas de entrada y salida
+│   ├── agent/
+│   │   ├── core.py          # Modelo, bucle de tools y guardrails
+│   │   └── tools.py         # Búsqueda, contactos y derivaciones
+│   ├── rag/
+│   │   └── indexer.py       # PDFs → chunks → embeddings → Chroma
+│   └── main.py              # FastAPI + /health
+├── data/                    # PDFs institucionales
+├── vector_store/            # Índice persistente de Chroma
+├── requirements.txt
+├── Dockerfile
+├── Modelfile                # agente-clinica (FROM llama3.1:8b)
+├── .env.example
+├── desarollo.md
+├── cambios.md
 └── README.md
 ```
+
+El `docker-compose.yml` y el `README.md` general están en la raíz del proyecto.
 
 ---
 
 ## Configuración
 
-Variables disponibles (ver `backend/.env.example`):
+Para levantar el backend no hace falta tocar ninguna variable: los valores por defecto de
+`docker-compose.yml` ya funcionan. Si necesitás cambiarlos, editá el bloque `environment` del
+servicio `api` en `docker-compose.yml`.
 
 | Variable | Valor por defecto | Uso |
 |----------|-------------------|-----|
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | URL de Ollama desde el contenedor. |
-| `OLLAMA_CHAT_MODEL` | `agente-clinica` | Modelo de generación/tools. |
+| `OLLAMA_CHAT_MODEL` | `agente-clinica` | Modelo de generación y herramientas. |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Modelo de embeddings. |
 | `CHROMA_COLLECTION` | `protocolos_clinica` | Colección vectorial. |
 | `DATA_DIR` | `/code/data` | PDFs dentro del contenedor. |
 | `CHROMA_PERSIST_DIR` | `/code/vector_store` | Persistencia de Chroma. |
 
-Si cambiás valores, editá `backend/.env` o `docker-compose.yml` y reiniciá:
+Después de cambiar configuración o código:
 
 ```powershell
-docker compose up -d
+docker compose up -d --build api
 ```
 
 ---
 
-## RAG y herramientas
+## Qué hace el backend
 
-- **Carga:** `PyPDFLoader` sobre todos los `*.pdf` de `backend/data/`.
-- **Fragmentación:** `RecursiveCharacterTextSplitter` con `chunk_size=1000`,
-  `chunk_overlap=200`.
-- **Embeddings:** `nomic-embed-text` (768 dims).
-- **Persistencia:** Chroma en `backend/vector_store/`, colección `protocolos_clinica`.
-- **Recuperación híbrida:** similitud vectorial + coincidencia léxica para nombres, correos y
-  extensiones (mejora los contactos exactos).
-- **Tools:**
+- **API REST:** `POST /api/chat` y `GET /health`.
+- **Agente:** interpreta consultas en español y decide qué herramienta usar.
+- **RAG:** carga PDFs, los fragmenta, genera embeddings y busca en ChromaDB.
+- **Búsqueda híbrida:** combina similitud vectorial y coincidencia léxica para recuperar
+  horarios, contactos, internos y correos.
+- **Herramientas:**
   - `buscar_protocolo(query)`: documentación institucional.
-  - `consultar_contacto_area(area)`: directorio interno.
+  - `consultar_contacto_area(area)`: responsable, interno y correo.
   - `derivar_solicitud(motivo, area)`: ticket de derivación simulado.
-- **Guardrails:** emergencia primero, sin diagnósticos/medicamentos, ticket visible y
-  prohibición de inventar datos.
+- **Guardrails:** no diagnostica, no receta, no inventa contactos ni protocolos, prioriza
+  emergencias y deriva cuando corresponde.
 
 ---
 
 ## Solución de problemas
 
-### “failed to connect to the docker API”
+### Docker no responde
 
-Docker Desktop está cerrado. Abrilo y esperá a que el motor inicie:
+Abrí Docker Desktop y esperá a que el motor inicie. Después verificá:
 
 ```powershell
-docker info
+docker compose ps
 ```
 
 ### Ollama no responde
 
+Abrí la aplicación de Ollama y verificá que los modelos estén disponibles:
+
 ```powershell
-curl.exe -s http://localhost:11434/api/tags
+ollama list
 ```
 
-Si falla, abrí Ollama y verificá que esté escuchando en `11434`.
-
-### “model not found: agente-clinica”
+### Falta el modelo `agente-clinica`
 
 ```powershell
 ollama create agente-clinica -f backend/Modelfile
 ```
 
-### No encuentra información / respuestas vacías
+### La API no encuentra información
 
-- Verificá que haya PDFs en `backend/data/`.
+- Verificá que los PDFs estén en `backend/data/`.
 - Reindexá:
 
 ```powershell
@@ -373,17 +392,18 @@ docker compose run --rm api python -m app.rag.indexer
 docker compose logs -f api
 ```
 
-### La API devuelve 503
+### La API devuelve error 503
 
-Suele significar que Ollama no está disponible o que Chroma no está indexado. Verificá
-`/health`, `ollama list` y el índice.
+Suele indicar que Ollama no está disponible o que el índice no está construido. Verificá:
 
-### Caracteres raros en PowerShell (`DiagnA3stico`)
+```powershell
+docker compose ps
+ollama list
+```
 
-La API devuelve UTF-8 correcto. El problema es la visualización del terminal. Probá con
-Windows Terminal o revisá la respuesta en `/docs`.
+Y volvé a indexar si es necesario.
 
-### Puerto 8000 ocupado
+### El puerto 8000 está ocupado
 
 Cambiá el mapeo en `docker-compose.yml`:
 
@@ -392,15 +412,26 @@ ports:
   - "8080:8000"
 ```
 
+Luego reconstruí:
+
+```powershell
+docker compose up -d --build api
+```
+
+### La interfaz muestra caracteres raros
+
+La API devuelve UTF-8 correcto. Si PowerShell muestra caracteres extraños, revisá la
+respuesta en `/docs` o usá Windows Terminal.
+
 ---
 
 ## Alcance y límites
 
 - El agente **no diagnostica, no receta y no interpreta estudios**.
-- Las derivaciones y tickets son **simulados** (no hay integración con un sistema real).
+- Las derivaciones y los tickets son **simulados**.
 - Los contactos provienen de la documentación institucional cargada.
-- No incluye autenticación, CORS ni TLS; no está listo para producción sin esos controles.
-- La calidad del RAG depende de los PDFs y del modelo de embeddings.
+- No incluye autenticación ni TLS; no está listo para producción sin esos controles.
+- La calidad de las respuestas depende de los PDFs y del modelo de embeddings.
 
-Para detalles técnicos por fase, ver [`desarollo.md`](desarollo.md).
+Para el detalle técnico por fases, ver [`desarollo.md`](desarollo.md).
 Para cambios e incidencias, ver [`cambios.md`](cambios.md).
