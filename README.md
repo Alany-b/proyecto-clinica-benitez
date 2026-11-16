@@ -108,6 +108,8 @@ docker compose down                 # detener el stack
 
 ## Documentación
 
+- [Informe completo del proyecto (PDF)](Documentacion_Clinica_Benitez.pdf)
+- [Informe editable (DOCX)](Documentacion_Clinica_Benitez.docx)
 - [Backend](backend/README.md)
 - [Frontend](frontend/README.md)
 - [Bitácora backend](backend/desarollo.md)
