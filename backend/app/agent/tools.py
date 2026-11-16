@@ -370,5 +370,8 @@ def derivar_solicitud(
     )
 
 
-TOOLS = [buscar_protocolo, consultar_contacto_area, derivar_solicitud]
-TOOL_MAP = {tool.name: tool for tool in TOOLS}
+AGENT_TOOLS = [consultar_contacto_area, derivar_solicitud]
+TOOL_MAP = {
+    tool.name: tool
+    for tool in [buscar_protocolo, *AGENT_TOOLS]
+}

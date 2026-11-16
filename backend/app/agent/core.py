@@ -28,7 +28,7 @@ from langchain_core.messages import (
 )
 from langchain_ollama import ChatOllama
 
-from app.agent.tools import TOOL_MAP, TOOLS
+from app.agent.tools import AGENT_TOOLS, TOOL_MAP, buscar_protocolo
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,16 @@ MAX_TOOL_ROUNDS = 4
 
 _THINKING_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.IGNORECASE | re.DOTALL)
 
-_INVALID_UNICODE_RE = re.compile(r"\\u00([ioun])")
-_UNICODE_REPLACEMENTS = {
-    "i": "í",
-    "o": "ó",
-    "u": "ú",
-    "n": "ñ",
-}
+_INVALID_UNICODE_PATTERNS = (
+    (re.compile(r"\\u00fu"), "ú"),
+    (re.compile(r"\\u00f(?![0-9a-fA-F])"), "ú"),
+    (re.compile(r"\\u00e(?![0-9a-fA-F])"), "é"),
+    (re.compile(r"\\u00a(?![0-9a-fA-F])"), "á"),
+    (re.compile(r"\\u00i"), "í"),
+    (re.compile(r"\\u00o"), "ó"),
+    (re.compile(r"\\u00u"), "ú"),
+    (re.compile(r"\\u00n"), "ñ"),
+)
 
 _EMERGENCY_TERMS = (
     "dolor de pecho",
@@ -84,6 +87,12 @@ _NO_PROTOCOL_ANSWER = (
     "para ese caso. Si necesitás, puedo registrar una derivación administrativa "
     "para que lo evalúe el área correspondiente."
 )
+
+_INTERNAL_TERM_REPLACEMENTS = {
+    "buscar_protocolo": "la búsqueda documental",
+    "consultar_contacto_area": "la consulta de contactos",
+    "derivar_solicitud": "la derivación",
+}
 
 _GREETING_RE = re.compile(
     r"^(hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|hey|qu[eé]\s+tal)[!. ]*$",
@@ -129,19 +138,34 @@ _AMBIGUITY_RESPONSE = (
     "Así puedo darte la información correcta."
 )
 
+_CONTACT_INTENT_TERMS = (
+    "contacto",
+    "telefono",
+    "interno",
+    "correo",
+    "extension",
+    "comunicar",
+    "llamar",
+    "derivacion",
+)
+
 _SYSTEM_TOOL_RULES = (
     "REGLAS OBLIGATORIAS DE OPERACIÓN:\n"
-    "- Consulta institucional (horarios, servicios, trámites, requisitos, protocolos, "
-    "coberturas): llamá a buscar_protocolo antes de responder.\n"
-    "- Si los fragmentos recuperados por buscar_protocolo hablan de traslados o trámites "
-    "generales pero NO mencionan específicamente la especialidad o procedimiento "
-    "consultado (por ejemplo, trasplantes cardíacos), aclará primero que la Clínica "
-    "Benitez no cuenta con un protocolo específico documentado para ese procedimiento, "
-    "antes de mencionar las pautas generales de derivación si corresponden.\n"
-    "- Si la documentación SÍ menciona explícitamente la práctica consultada (por ejemplo, "
-    "resonancias magnéticas en la autorización de obras sociales), usá esos pasos y no "
-    "respondas que falta información.\n"
-    "- Consulta sobre el contacto de un área: llamá a consultar_contacto_area.\n"
+    "- La documentación institucional se recupera automáticamente y se te entrega "
+    "como CONTEXTO INSTITUCIONAL. Usala como fuente principal para horarios, "
+    "servicios, trámites, requisitos, protocolos y coberturas. No invoques "
+    "herramientas para buscar documentación.\n"
+    "- Si los fragmentos del CONTEXTO hablan de traslados o trámites generales pero "
+    "NO mencionan específicamente la especialidad o procedimiento consultado (por "
+    "ejemplo, trasplantes cardíacos), aclará primero que la Clínica Benitez no cuenta "
+    "con un protocolo específico documentado para ese procedimiento, antes de "
+    "mencionar las pautas generales de derivación si corresponden.\n"
+    "- Si la documentación SÍ menciona explícitamente la práctica consultada (por "
+    "ejemplo, resonancias magnéticas en la autorización de obras sociales), usá esos "
+    "pasos y no respondas que falta información.\n"
+    "- Usá consultar_contacto_area SOLO si el usuario pide explícitamente un "
+    "contacto, teléfono, interno, correo o cómo comunicarse. No la uses para "
+    "horarios, ubicación o disponibilidad que ya estén en el CONTEXTO.\n"
     "- Consulta clínica, síntomas, medicación, diagnóstico o emergencia: llamá a "
     "derivar_solicitud antes de responder; no brindes orientación médica.\n"
     "- Si la consulta es ambigua o no especifica el servicio, área o tipo de trámite, "
@@ -151,6 +175,8 @@ _SYSTEM_TOOL_RULES = (
     "al servicio de emergencias, antes de cualquier otra aclaración.\n"
     "- Saludos simples, despedidas o preguntas de identidad: respondé directamente SIN "
     "usar herramientas.\n"
+    "- No menciones nombres de herramientas, funciones, modelos, bases vectoriales ni "
+    "detalles técnicos. Respondé como asistente institucional.\n"
     "- No inventes horarios, contactos, tickets ni resultados de herramientas.\n"
 )
 
@@ -175,11 +201,137 @@ def _is_vague_service_request(message: str) -> bool:
     return not any(term in normalized for term in _SERVICE_HINTS)
 
 
+def _mentions_contact_intent(message: str) -> bool:
+    normalized = _normalize_text(message)
+    return any(term in normalized for term in _CONTACT_INTENT_TERMS)
+
+
 def _apply_no_protocol_guard(answer: str, no_specific_protocol: bool) -> str:
     """Garantiza que la respuesta mencione la ausencia de protocolo específico."""
     if no_specific_protocol and "protocolo especifico" not in _normalize_text(answer):
         return _NO_PROTOCOL_ANSWER
     return answer
+
+
+def _count_words(text: str) -> int:
+    return len(re.findall(r"\b[\wáéíóúñü]+\b", text, flags=re.IGNORECASE))
+
+
+def _previous_user_content(
+    history: Sequence[Mapping[str, Any]] | None,
+) -> str | None:
+    for item in reversed(history or []):
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("role", "")).lower() not in ("user", "human"):
+            continue
+        content = item.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    return None
+
+
+def _build_search_query(
+    message: str,
+    history: Sequence[Mapping[str, Any]] | None,
+) -> str:
+    """Combina el turno anterior si el mensaje actual es muy corto."""
+    if _count_words(message) > 4:
+        return message.strip()
+
+    previous = _previous_user_content(history)
+    if not previous or _GREETING_RE.match(previous):
+        return message.strip()
+
+    return f"{previous} {message.strip()}"
+
+
+def _retrieve_context(query: str) -> tuple[str | None, bool]:
+    """Ejecuta la recuperación documental antes de invocar al LLM."""
+    try:
+        result = buscar_protocolo.invoke({"query": query})
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("Falló la recuperación proactiva de documentación")
+        return None, False
+
+    if not isinstance(result, str) or not result.strip():
+        return None, False
+    if result.startswith("Error:"):
+        return None, False
+
+    return result, result.startswith(_NO_PROTOCOL_PREFIX)
+
+
+def _sanitize_internal_terms(answer: str) -> str:
+    """Evita que el usuario final vea nombres de herramientas internas."""
+    for name, replacement in _INTERNAL_TERM_REPLACEMENTS.items():
+        answer = re.sub(
+            rf"{re.escape(name)}\s*\([^)]*\)",
+            replacement,
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            re.escape(name),
+            replacement,
+            answer,
+            flags=re.IGNORECASE,
+        )
+    return answer
+
+
+def _ensure_emergency_ticket(
+    message: str,
+    tools_used: list[str],
+    tool_results: list[str],
+) -> None:
+    """Registra una derivación si la emergencia no generó ticket por el modelo."""
+    if not _is_emergency(message) or "derivar_solicitud" in tools_used:
+        return
+
+    tool = TOOL_MAP.get("derivar_solicitud")
+    if tool is None:
+        return
+
+    try:
+        result = tool.invoke(
+            {
+                "motivo": message.strip()[:300],
+                "area": "urgencias",
+            }
+        )
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("No se pudo registrar la derivación de emergencia")
+        return
+
+    tools_used.append("derivar_solicitud")
+    tool_results.append(str(result))
+
+
+def _ensure_contact_answer(answer: str, contact_result: str | None) -> str:
+    """Si el modelo omitió el interno recuperado, devuelve el contacto real."""
+    if not contact_result:
+        return answer
+
+    match = re.search(r"Int\.\s*(\d+)", contact_result)
+    if match and match.group(1) not in answer:
+        return contact_result
+    return answer
+
+
+def _finalize_answer(
+    message: str,
+    answer: str,
+    tools_used: list[str],
+    tool_results: list[str],
+    no_specific_protocol: bool,
+    contact_result: str | None,
+) -> str:
+    _ensure_emergency_ticket(message, tools_used, tool_results)
+    answer = _ensure_contact_answer(answer, contact_result)
+    answer = _apply_no_protocol_guard(answer, no_specific_protocol)
+    answer = _apply_safety_guards(message, answer, tool_results)
+    return _sanitize_internal_terms(answer)
 
 
 def _apply_safety_guards(
@@ -223,7 +375,7 @@ def _build_llm() -> ChatOllama:
 @lru_cache(maxsize=1)
 def get_agent():
     """Devuelve el modelo con las herramientas enlazadas (singleton)."""
-    return _build_llm().bind_tools(TOOLS)
+    return _build_llm().bind_tools(AGENT_TOOLS)
 
 
 def _content_to_text(content: Any) -> str:
@@ -247,15 +399,18 @@ def _content_to_text(content: Any) -> str:
     return _THINKING_RE.sub("", text).strip()
 
 
+def _repair_invalid_unicode_escapes(text: str) -> str:
+    for pattern, replacement in _INVALID_UNICODE_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def _extract_json_object(text: str) -> Mapping[str, Any] | None:
     """Extrae el primer objeto JSON válido embebido en texto.
 
     Soporta JSON dentro de bloques Markdown y texto adicional alrededor.
     """
-    text = _INVALID_UNICODE_RE.sub(
-        lambda match: _UNICODE_REPLACEMENTS[match.group(1)],
-        text,
-    )
+    text = _repair_invalid_unicode_escapes(text)
 
     for start, character in enumerate(text):
         if character != "{":
@@ -406,14 +561,39 @@ def run_agent(
             pasos=0,
         )
 
+    emergency = _is_emergency(message)
+    rag_result: str | None = None
+    no_specific_protocol = False
+
+    if not emergency:
+        search_query = _build_search_query(message, history)
+        rag_result, no_specific_protocol = _retrieve_context(search_query)
+
     messages: list[BaseMessage] = [SystemMessage(content=_SYSTEM_TOOL_RULES)]
+
+    if rag_result:
+        messages.append(
+            SystemMessage(
+                content=(
+                    "CONTEXTO INSTITUCIONAL RECUPERADO "
+                    "(fuente principal; no menciones herramientas ni detalles "
+                    "técnicos):\n\n"
+                    f"{rag_result}"
+                )
+            )
+        )
+
     messages.extend(_history_to_messages(history))
     messages.append(HumanMessage(content=message.strip()))
 
     agent = get_agent()
-    tools_used: list[str] = []
+    tools_used: list[str] = (
+        ["buscar_protocolo"]
+        if rag_result and "[Fragmento" in rag_result
+        else []
+    )
     tool_results: list[str] = []
-    no_specific_protocol = False
+    contact_result: str | None = None
 
     for step in range(1, MAX_TOOL_ROUNDS + 1):
         response = agent.invoke(messages)
@@ -438,8 +618,13 @@ def run_agent(
                     "No se pudo interpretar una tool call embebida; se devuelve "
                     "un mensaje seguro."
                 )
-                answer = _apply_safety_guards(
-                    message, _TOOL_TEXT_FALLBACK, tool_results
+                answer = _finalize_answer(
+                    message,
+                    _TOOL_TEXT_FALLBACK,
+                    tools_used,
+                    tool_results,
+                    no_specific_protocol,
+                    contact_result,
                 )
                 return AgentResult(
                     respuesta=answer,
@@ -454,8 +639,14 @@ def run_agent(
                     "No pude generar una respuesta. ¿Podés reformular la consulta "
                     "con un poco más de detalle?"
                 )
-            answer = _apply_no_protocol_guard(answer, no_specific_protocol)
-            answer = _apply_safety_guards(message, answer, tool_results)
+            answer = _finalize_answer(
+                message,
+                answer,
+                tools_used,
+                tool_results,
+                no_specific_protocol,
+                contact_result,
+            )
             return AgentResult(
                 respuesta=answer,
                 herramientas_usadas=tools_used,
@@ -468,7 +659,20 @@ def run_agent(
             tool = TOOL_MAP.get(name)
             logger.info("Paso %d: herramienta=%s args=%s", step, name, args)
 
-            if tool is None:
+            if (
+                name == "consultar_contacto_area"
+                and rag_result
+                and not _mentions_contact_intent(message)
+            ):
+                logger.info(
+                    "Se omite la consulta de contacto: no fue solicitada y el "
+                    "contexto institucional ya responde."
+                )
+                result = (
+                    "No es necesario consultar contactos para esta consulta. "
+                    "Respondé usando el CONTEXTO INSTITUCIONAL."
+                )
+            elif tool is None:
                 result = f"Error: la herramienta '{name}' no existe."
             else:
                 try:
@@ -479,6 +683,8 @@ def run_agent(
                     result = f"Error al ejecutar la herramienta '{name}': {exc}"
 
             result_text = str(result)
+            if name == "consultar_contacto_area" and "Teléfono interno:" in result_text:
+                contact_result = result_text
             if result_text.startswith(_NO_PROTOCOL_PREFIX):
                 no_specific_protocol = True
             tool_results.append(result_text)
@@ -490,9 +696,14 @@ def run_agent(
             )
 
     logger.warning("Se agotaron las %d rondas de herramientas", MAX_TOOL_ROUNDS)
-    answer = _final_answer_without_tools(messages)
-    answer = _apply_no_protocol_guard(answer, no_specific_protocol)
-    answer = _apply_safety_guards(message, answer, tool_results)
+    answer = _finalize_answer(
+        message,
+        _final_answer_without_tools(messages),
+        tools_used,
+        tool_results,
+        no_specific_protocol,
+        contact_result,
+    )
     return AgentResult(
         respuesta=answer,
         herramientas_usadas=tools_used,

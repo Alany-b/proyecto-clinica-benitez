@@ -340,16 +340,20 @@ docker compose up -d --build api
 ## Qué hace el backend
 
 - **API REST:** `POST /api/chat` y `GET /health`.
-- **Agente:** interpreta consultas en español y decide qué herramienta usar.
-- **RAG:** carga PDFs, los fragmenta, genera embeddings y busca en ChromaDB.
+- **Agente:** interpreta consultas en español y recibe el contexto documental antes de
+  responder; solo invoca herramientas para contacto o derivación.
+- **RAG proactivo:** la búsqueda en Chroma se ejecuta automáticamente antes del modelo, por lo
+  que una consulta simple no depende de que el modelo genere un JSON perfecto.
+- **Contexto multi-turno:** si el mensaje es muy corto (“Centro quirúrgico”, “¿Y los sábados?”)
+  se combina con el turno anterior del usuario para recuperar la información correcta.
 - **Búsqueda híbrida:** combina similitud vectorial y coincidencia léxica para recuperar
   horarios, contactos, internos y correos.
-- **Herramientas:**
-  - `buscar_protocolo(query)`: documentación institucional.
+- **Herramientas expuestas al modelo:**
   - `consultar_contacto_area(area)`: responsable, interno y correo.
   - `derivar_solicitud(motivo, area)`: ticket de derivación simulado.
+  - La búsqueda documental (`buscar_protocolo`) es interna y la ejecuta el backend.
 - **Guardrails:** no diagnostica, no receta, no inventa contactos ni protocolos, prioriza
-  emergencias y deriva cuando corresponde.
+  emergencias, genera ticket determinista si corresponde y evita mencionar nombres internos.
 
 ---
 

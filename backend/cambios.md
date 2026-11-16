@@ -9,6 +9,39 @@ interfieren con el plan inicial. Se actualiza a medida que avanza el proyecto.
 
 ---
 
+## 2026-11-16 — RAG proactivo y fluidez conversacional
+
+**Motivo:** el modelo de 8B podía fallar al generar JSON con tildes para una búsqueda simple,
+y los seguimientos cortos no siempre recuperaban el contexto anterior. Además, tres tools
+disponibles aumentaban llamadas innecesarias y riesgo de nombres internos.
+
+**Cambios:**
+
+- Expansión de consulta si el mensaje tiene ≤ 4 palabras, combinando el turno previo del
+  usuario con el actual.
+- `buscar_protocolo` se ejecuta automáticamente en Python antes de `ChatOllama`; los
+  fragmentos se inyectan como CONTEXTO INSTITUCIONAL y se registra el badge RAG.
+- `bind_tools()` queda solo con `consultar_contacto_area` y `derivar_solicitud`.
+- Prompt actualizado: la búsqueda es automática y no se deben mencionar herramientas.
+- Sanitización determinista de nombres internos en la respuesta.
+- Guardrails conservados: ambigüedad antes del RAG, emergencia sin RAG, ticket determinista,
+  contacto real si el modelo omite el interno y no extrapolación.
+- `Modelfile` recompilado: `ollama create agente-clinica -f backend/Modelfile`.
+
+**Validación:**
+
+- RAG por imágenes → `buscar_protocolo`, horarios reales.
+- “Horario de atención” → aclaración; “Centro quirúrgico” → 09:00–15:00.
+- “¿Y los sábados?” → 08:00–13:00.
+- Contacto → Int. 220.
+- Emergencia → guardia, sin medicación y ticket.
+- Trasplantes → sin protocolo específico, sin extrapolar.
+- E2E: 5 escenarios + seguimiento, `UI_PROACTIVE_E2E_OK`, sin nombres internos ni errores CORS.
+
+**Impacto:** menor latencia y menos errores de tool calling; el contrato HTTP no cambia.
+
+---
+
 ## 2026-11-13 — Prevención de extrapolación en procedimientos no documentados
 
 **Motivo:** ante “¿Cuál es el protocolo para trasplantes cardíacos?”, el agente recuperaba

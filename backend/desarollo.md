@@ -802,6 +802,124 @@ El prompt por sí solo no impedía que el modelo mezclara fragmentos solapados; 
 garantiza que, si no hay evidencia específica, el agente no reciba pasos generales como si
 fueran el protocolo consultado.
 
+### RAG proactivo y fluidez conversacional (2026-11-16)
+
+**Problema:** `llama3.1:8b` podía bloquearse formateando JSON con tildes al intentar invocar
+`buscar_protocolo`, y los seguimientos cortos (“Centro quirúrgico”, “¿Y los sábados?”) no
+siempre recuperaban el contexto anterior. Además, dejar tres tools disponibles aumentaba las
+llamadas innecesarias y el riesgo de exponer nombres internos.
+
+**Decisión arquitectónica:** mover la recuperación documental a Python y dejar al modelo solo
+las acciones que requieren una decisión conversacional (contacto y derivación).
+
+#### 1. Resolución de contexto multi-turno
+
+- Si el mensaje actual tiene **4 palabras o menos** y existe un turno previo del usuario, se
+  arma una consulta de búsqueda combinando ambos:
+  `"Horario de atención" + "Centro quirúrgico"`.
+- Solo se usa para la recuperación; el mensaje que recibe el LLM sigue siendo el actual.
+- Si el turno anterior era un saludo, no se combina.
+- **Porqué:** el usuario no debería repetir el tema completo en un seguimiento natural. La
+  expansión mejora la recuperación sin alterar el hilo de la conversación.
+
+#### 2. RAG proactivo antes del LLM
+
+- Antes de invocar a `ChatOllama`, el backend ejecuta `buscar_protocolo` con la consulta
+  expandida.
+- Los fragmentos se inyectan como un `SystemMessage` de **CONTEXTO INSTITUCIONAL**.
+- Si se usaron fragmentos, se registra `buscar_protocolo` en `herramientas_usadas` para que el
+  frontend muestre el badge RAG.
+- Si no hay protocolo específico, se inyecta la instrucción de no extrapolación y se activa el
+  guardrail determinista.
+- **Porqué:** elimina la dependencia de que el modelo de 8B genere un JSON perfecto para una
+  búsqueda que el backend puede ejecutar directamente. Reduce latencia, errores de formato y
+  llamadas innecesarias.
+
+#### 3. Tool calling reducido
+
+- `bind_tools()` recibe solo `consultar_contacto_area` y `derivar_solicitud`.
+- `buscar_protocolo` sigue existiendo en `TOOL_MAP` para el RAG proactivo y el fallback parser,
+  pero no se ofrece al modelo como herramienta.
+- **Porqué:** menos tools = menos oportunidades de JSON inválido, menos ruido en la selección
+  y un flujo más predecible. El fallback parser queda como red de seguridad.
+
+#### 4. Prompt y cero nombres internos
+
+- El SYSTEM prompt ahora indica que la documentación se recupera automáticamente y se entrega
+  como contexto; el modelo no debe invocar una tool de búsqueda.
+- Se prohíbe mencionar nombres de herramientas, funciones, modelos, bases vectoriales o
+  detalles técnicos en la respuesta.
+- Se agregó una sanitización determinista (`_sanitize_internal_terms`) que reemplaza nombres
+  internos si el modelo los menciona igual.
+- **Porqué:** el usuario final debe recibir una respuesta institucional, no detalles de
+  implementación. El prompt solo no garantiza el cumplimiento; la sanitización actúa como red.
+
+#### 5. Guardrails conservados y ampliados
+
+- El guardrail de ambigüedad se mantiene **antes** del RAG proactivo: evita búsquedas
+  vectoriales inútiles y preserva la respuesta determinista del Escenario 3.
+- El RAG proactivo se omite en emergencias clínicas.
+- Si el modelo no genera ticket en una emergencia, el backend ejecuta
+  `derivar_solicitud` de forma determinista.
+- Si el modelo omite el interno recuperado por contacto, se devuelve el contacto real.
+- La no extrapolación se mantiene con el filtro de relevancia y el guardrail de “sin protocolo
+  específico”.
+- **Porqué:** la seguridad y la fidelidad documental no pueden depender de la variabilidad del
+  modelo.
+
+#### 6. RAG frente a fine-tuning o context stuffing
+
+Se eligió RAG proactivo frente a las otras dos alternativas:
+
+- **Fine-tuning:** exigiría reentrenar cada vez que cambian horarios, contactos o protocolos,
+  no garantiza trazabilidad de la fuente y consume más recursos.
+- **Context stuffing:** enviar todos los documentos en cada prompt aumenta tokens, latencia y
+  costo, y puede diluir la información relevante. Además, el corpus puede crecer.
+- **RAG:** permite actualizar PDFs y reindexar sin reentrenar, recupera solo lo relevante,
+  permite citar documento/página y mantiene los datos en local.
+- **Privacidad:** los PDFs, embeddings y modelos quedan en el equipo; no se envía información
+  hospitalaria a la nube.
+
+#### 7. Flujo resultante
+
+```text
+Mensaje
+  ├─ saludo → respuesta directa
+  ├─ ambigüedad → aclaración determinista
+  ├─ emergencia → sin RAG; LLM + derivación/ticket garantizado
+  └─ consulta institucional/contacto
+       ├─ expansión de contexto si es corta
+       ├─ RAG proactivo en Python
+       ├─ CONTEXTO INSTITUCIONAL al LLM
+       ├─ tools: contacto / derivación
+       └─ sanitización + guardrails + respuesta final
+```
+
+#### 8. Validaciones
+
+| Prueba | Resultado |
+|--------|-----------|
+| Horario de Diagnóstico por Imágenes | ✅ RAG proactivo, badge `buscar_protocolo`, horarios reales. |
+| “Horario de atención” | ✅ Pide aclaración; no consulta Chroma. |
+| Seguimiento “Centro quirúrgico” | ✅ Expande contexto y responde 09:00–15:00. |
+| Seguimiento “¿Y los sábados?” | ✅ Responde 08:00–13:00 con el contexto anterior. |
+| Contacto de Auditoría Médica | ✅ Interno 220 y correo real. |
+| Emergencia por dolor de pecho | ✅ Guardia/emergencias, sin medicación, ticket. |
+| Trasplantes cardíacos | ✅ Sin protocolo específico; no extrapola. |
+| “Hola” | ✅ Sin tools, `pasos=0`. |
+| Nombres internos en respuestas | ✅ Ninguno; sanitización activa. |
+
+**E2E de interfaz:** 5 escenarios del sidebar + seguimiento
+“Horario de atención” → “Centro quirúrgico”. Los escenarios enviaron `history: []`; el
+seguimiento envió `history` con los dos mensajes previos. Resultado: `UI_PROACTIVE_E2E_OK`, sin
+errores de consola y con ambos contenedores healthy.
+
+**Recompilación del modelo:**
+
+```powershell
+ollama create agente-clinica -f backend/Modelfile
+```
+
 ## Comandos ejecutados
 
 | Fecha | Comando | Resultado |
@@ -877,6 +995,10 @@ fueran el protocolo consultado.
 | 2026-11-13 | Reparación de escapes Unicode inválidos en fallback | ✅ `\u00i` → `í`; el JSON de trasplantes se parsea. |
 | 2026-11-13 | Filtro de relevancia en `buscar_protocolo` | ✅ Sin protocolo específico para trasplantes; resonancia sin mezclar derivación. |
 | 2026-11-13 | Regresión: horario, contacto, emergencia y saludo | ✅ Todos sin cambios. |
+| 2026-11-16 | RAG proactivo + expansión multi-turno + tools reducidas | ✅ `buscar_protocolo` se ejecuta en Python; bind de contacto/derivación. |
+| 2026-11-16 | Sanitización de nombres internos | ✅ Respuestas sin `buscar_protocolo`, `consultar_contacto_area` ni `derivar_solicitud`. |
+| 2026-11-16 | Validación backend de 5 escenarios + seguimiento | ✅ RAG, contacto, ambigüedad, emergencia, no protocolo y “Centro quirúrgico”. |
+| 2026-11-16 | E2E frontend con 5 escenarios + seguimiento | ✅ `UI_PROACTIVE_E2E_OK`; historial correcto y sin errores de consola. |
 
 ## Librerías instaladas (requirements.txt)
 
