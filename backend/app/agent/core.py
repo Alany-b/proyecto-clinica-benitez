@@ -105,6 +105,13 @@ _GREETING_RESPONSE = (
     "¿En qué puedo ayudarte?"
 )
 
+_HELP_RE = re.compile(
+    r"^[\s¿¡]*(qu[eé] hago|qu[eé] debo hacer|que debo hacer|c[oó]mo me ayudas|"
+    r"c[oó]mo pod[eé]s ayudar(?:me)?|en qu[eé] me puedes ayudar|"
+    r"qu[eé] pod[eé]s hacer|qu[eé] puedo hacer|ayuda)\b",
+    re.IGNORECASE,
+)
+
 _AMBIGUITY_TERMS = ("disponibilidad", "horario", "turno", "servicio", "atencion")
 
 _SERVICE_HINTS = (
@@ -175,6 +182,10 @@ _SYSTEM_TOOL_RULES = (
     "al servicio de emergencias, antes de cualquier otra aclaración.\n"
     "- Saludos simples, despedidas o preguntas de identidad: respondé directamente SIN "
     "usar herramientas.\n"
+    "- Si el usuario pregunta qué hacés, cómo podés ayudarlo o qué debe hacer, "
+    "presentate con un tono amable y explicá brevemente que sos el Asistente "
+    "Administrativo de la Clínica Benitez y que podés brindar horarios, requisitos, "
+    "contactos internos o generar derivaciones.\n"
     "- No menciones nombres de herramientas, funciones, modelos, bases vectoriales ni "
     "detalles técnicos. Respondé como asistente institucional.\n"
     "- No inventes horarios, contactos, tickets ni resultados de herramientas.\n"
@@ -206,9 +217,18 @@ def _mentions_contact_intent(message: str) -> bool:
     return any(term in normalized for term in _CONTACT_INTENT_TERMS)
 
 
-def _apply_no_protocol_guard(answer: str, no_specific_protocol: bool) -> str:
-    """Garantiza que la respuesta mencione la ausencia de protocolo específico."""
-    if no_specific_protocol and "protocolo especifico" not in _normalize_text(answer):
+def _apply_no_protocol_guard(
+    answer: str,
+    no_specific_protocol: bool,
+    tools_used: list[str],
+) -> str:
+    """Inyecta el aviso solo si no hubo una acción de contacto/derivación."""
+    only_rag_or_none = not tools_used or set(tools_used) <= {"buscar_protocolo"}
+    if (
+        no_specific_protocol
+        and only_rag_or_none
+        and "protocolo especifico" not in _normalize_text(answer)
+    ):
         return _NO_PROTOCOL_ANSWER
     return answer
 
@@ -329,7 +349,7 @@ def _finalize_answer(
 ) -> str:
     _ensure_emergency_ticket(message, tools_used, tool_results)
     answer = _ensure_contact_answer(answer, contact_result)
-    answer = _apply_no_protocol_guard(answer, no_specific_protocol)
+    answer = _apply_no_protocol_guard(answer, no_specific_protocol, tools_used)
     answer = _apply_safety_guards(message, answer, tool_results)
     return _sanitize_internal_terms(answer)
 
@@ -370,6 +390,24 @@ def _build_llm() -> ChatOllama:
         base_url=os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_URL),
         temperature=0.2,
     )
+
+
+def _answer_onboarding(message: str) -> str:
+    """Responde preguntas generales sin RAG y sin tools."""
+    try:
+        response = _build_llm().invoke(
+            [
+                SystemMessage(content=_SYSTEM_TOOL_RULES),
+                HumanMessage(content=message.strip()),
+            ]
+        )
+        answer = _content_to_text(response.content)
+        if answer:
+            return _sanitize_internal_terms(answer)
+    except Exception:  # pragma: no cover - defensivo
+        logger.exception("Falló la respuesta de onboarding")
+
+    return _GREETING_RESPONSE
 
 
 @lru_cache(maxsize=1)
@@ -552,6 +590,13 @@ def run_agent(
             respuesta=_GREETING_RESPONSE,
             herramientas_usadas=[],
             pasos=0,
+        )
+
+    if _HELP_RE.match(message.strip()):
+        return AgentResult(
+            respuesta=_answer_onboarding(message),
+            herramientas_usadas=[],
+            pasos=1,
         )
 
     if _is_vague_service_request(message):

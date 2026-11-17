@@ -9,6 +9,53 @@ interfieren con el plan inicial. Se actualiza a medida que avanza el proyecto.
 
 ---
 
+## 2026-11-17 — Onboarding fluido y guardrail de no protocolo contextual
+
+**Motivo:** el guardrail de “no protocolo” podía pisar respuestas naturales en preguntas
+generales de ayuda y en consultas donde ya se había ejecutado una derivación o un contacto.
+
+**Cambios:**
+
+1. **Onboarding (`core.py`):**
+   - Se agregó `_HELP_RE` para detectar “¿Qué podés hacer?”, “¿Qué debo hacer?”,
+     “¿Cómo me ayudas?”, “Ayuda”, etc., tolerando `¿`, tildes y variantes.
+   - Si el mensaje es un saludo o una pregunta de ayuda, se omite el RAG proactivo.
+   - Las preguntas de ayuda se responden con el modelo sin tools, usando el SYSTEM prompt
+     para presentar al Asistente Administrativo y sus capacidades.
+2. **Guardrail de no protocolo (`core.py`):**
+   - `_apply_no_protocol_guard` ahora recibe `tools_used` y solo inyecta el texto restrictivo
+     si la lista está vacía o solo contiene `buscar_protocolo`.
+   - Si se usó `derivar_solicitud` o `consultar_contacto_area`, no se agrega el texto
+     robótico: la acción resuelta y la respuesta del modelo prevalecen.
+3. **Prompt (`Modelfile` y `SystemMessage`):**
+   - Se agregó la instrucción de onboarding en voseo: presentarse como Asistente
+     Administrativo de la Clínica Benitez y explicar que puede brindar horarios, requisitos,
+     contactos internos o generar derivaciones.
+   - Se recompiló el modelo:
+     `ollama create agente-clinica -f backend/Modelfile` → `success`.
+4. Se reconstruyó y reinició la API.
+
+**Validación:**
+
+| Prueba | Resultado |
+|--------|-----------|
+| “¿Qué podés hacer?” | ✅ Onboarding amable, sin tools, `pasos=1`. |
+| “¿Qué debo hacer?” | ✅ Onboarding, sin tools. |
+| “¿Cómo me ayudas?” | ✅ Onboarding, sin tools. |
+| “Ayuda” | ✅ Onboarding, sin tools. |
+| `_apply_no_protocol_guard` sin tools | ✅ Inyecta aviso de no protocolo. |
+| `_apply_no_protocol_guard` solo con RAG | ✅ Inyecta aviso. |
+| `_apply_no_protocol_guard` con derivación | ✅ No inyecta; conserva respuesta/ticket. |
+| `_apply_no_protocol_guard` con contacto | ✅ No inyecta; conserva contacto real. |
+| Consulta de trasplantes sin tools | ✅ Aclara ausencia de protocolo específico. |
+| Emergencia | ✅ Deriva, genera ticket y no recibe aviso robótico. |
+| Contacto de Auditoría Médica | ✅ Interno 220, sin aviso de protocolo. |
+
+**Impacto:** mejora la fluidez en onboarding y evita que un guardrail de recuperación
+sobrescriba respuestas de acciones ya resueltas. El contrato HTTP no cambia.
+
+---
+
 ## 2026-11-17 — CORS para Vite en puertos alternativos e IP de WSL/LAN
 
 **Motivo:** el frontend abierto en `http://172.23.48.1:5174` recibía errores CORS en

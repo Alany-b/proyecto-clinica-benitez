@@ -948,6 +948,32 @@ dominios públicos. En producción debe restringirse a los dominios reales.
 - E2E en `http://172.23.48.1:5174`: estado **Online**, `POST /api/chat` `200` y respuesta con
   horarios reales, sin errores CORS.
 
+### Onboarding y guardrail de no protocolo contextual (2026-11-17)
+
+**Problema:** el guardrail de “no protocolo” podía reemplazar respuestas naturales en
+preguntas generales de ayuda o después de una derivación/contacto exitoso.
+
+**Cambios:**
+
+- `_HELP_RE` detecta preguntas de ayuda con o sin `¿`, tildes y variantes; se omite el RAG
+  proactivo y el modelo responde directamente sin tools.
+- `_apply_no_protocol_guard(answer, no_specific_protocol, tools_used)` solo inyecta el aviso
+  si no hay tools o solo se usó `buscar_protocolo`. Si hubo `derivar_solicitud` o
+  `consultar_contacto_area`, conserva la respuesta y la acción.
+- Se agregó la instrucción de onboarding al `Modelfile` y al `SystemMessage`.
+- Se recompiló el modelo y se reconstruyó la API.
+
+**Porqué:** el onboarding debe explicar la función del asistente sin una búsqueda innecesaria,
+y un guardrail de recuperación no debe pisar una derivación o un contacto que ya resolvieron
+la solicitud.
+
+**Validación:**
+
+- Onboarding: “¿Qué podés hacer?”, “¿Qué debo hacer?”, “¿Cómo me ayudas?” y “Ayuda” →
+  respuesta amable, sin tools.
+- Guardrail: sin tools/solo RAG → aviso; con derivación/contacto → no aviso.
+- Emergencia → ticket; contacto → interno 220; trasplantes → sin protocolo específico.
+
 ## Comandos ejecutados
 
 | Fecha | Comando | Resultado |
@@ -1029,6 +1055,9 @@ dominios públicos. En producción debe restringirse a los dominios reales.
 | 2026-11-16 | E2E frontend con 5 escenarios + seguimiento | ✅ `UI_PROACTIVE_E2E_OK`; historial correcto y sin errores de consola. |
 | 2026-11-17 | CORS con `allow_origin_regex` para localhost/IP privada | ✅ Vite 5174 e IP WSL habilitados; origen externo rechazado. |
 | 2026-11-17 | E2E en `http://172.23.48.1:5174` | ✅ Online, `POST /api/chat` 200, sin errores CORS. |
+| 2026-11-17 | `_HELP_RE` + onboarding directo sin RAG | ✅ “¿Qué podés hacer?”, “¿Qué debo hacer?”, “¿Cómo me ayudas?” y “Ayuda” sin tools. |
+| 2026-11-17 | Guardrail de no protocolo condicionado por `tools_used` | ✅ No pisa derivación/contacto; sí avisa cuando no hay tools o solo RAG. |
+| 2026-11-17 | `ollama create agente-clinica -f backend/Modelfile` | ✅ Modelo recompilado con instrucción de onboarding. |
 
 ## Librerías instaladas (requirements.txt)
 
