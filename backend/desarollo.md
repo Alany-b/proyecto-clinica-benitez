@@ -129,6 +129,9 @@ proyecto-clinica-benitez/
 > **Reorganización 2026-11-13:** `app/`, `data/`, `vector_store/`, `Dockerfile`,
 > `requirements.txt`, `Modelfile`, `.dockerignore`, `.env.example` y los documentos técnicos
 > se movieron a `backend/`. `docker-compose.yml` y `.gitignore` quedan en la raíz.
+>
+> **Actualización 2026-11-17:** `.env.example` se movió a la raíz para que Compose lo
+> encuentre al copiarlo como `.env`. El `frontend/.env.example` sigue siendo para Vite local.
 
 ### Fase 1 — Ejecución (2026-11-12)
 

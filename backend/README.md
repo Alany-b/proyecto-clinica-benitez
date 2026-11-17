@@ -321,13 +321,13 @@ backend/
 ├── requirements.txt
 ├── Dockerfile
 ├── Modelfile                # agente-clinica (FROM llama3.1:8b)
-├── .env.example
 ├── desarollo.md
 ├── cambios.md
 └── README.md
 ```
 
-El `docker-compose.yml` y el `README.md` general están en la raíz del proyecto.
+El `docker-compose.yml`, el `.env.example` y el `README.md` general están en la raíz del
+proyecto.
 
 ---
 
@@ -336,6 +336,15 @@ El `docker-compose.yml` y el `README.md` general están en la raíz del proyecto
 Para levantar el backend no hace falta tocar ninguna variable: los valores por defecto de
 `docker-compose.yml` ya funcionan. Si necesitás cambiarlos, editá el bloque `environment` del
 servicio `api` en `docker-compose.yml`.
+
+También podés crear un `.env` **en la raíz del proyecto** a partir de `.env.example`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Compose lee ese archivo automáticamente para resolver las variables `${...}`. El archivo
+`.env` es opcional y no se versiona.
 
 | Variable | Valor por defecto | Uso |
 |----------|-------------------|-----|

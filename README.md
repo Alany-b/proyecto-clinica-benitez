@@ -48,6 +48,7 @@ proyecto-clinica-benitez/
 │   ├── nginx.conf
 │   └── README.md
 ├── docker-compose.yml    # Servicios api + frontend
+├── .env.example          # Configuración opcional (copiar a .env)
 ├── .gitignore
 └── README.md
 ```
@@ -58,6 +59,18 @@ proyecto-clinica-benitez/
 - Ollama ejecutándose en el host (`http://localhost:11434`).
 - Modelos: `llama3.1:8b` y `nomic-embed-text`.
 - PDFs institucionales en `backend/data/`.
+
+## Configuración opcional
+
+No hace falta crear un `.env` para levantar el proyecto: `docker-compose.yml` trae valores por
+defecto. Si necesitás cambiarlos, copiá `.env.example` a `.env` en la raíz y reiniciá:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+`frontend/.env` es independiente y solo se usa para desarrollo local con Vite.
 
 ## Despliegue completo
 

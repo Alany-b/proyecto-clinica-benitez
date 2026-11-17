@@ -9,6 +9,22 @@ interfieren con el plan inicial. Se actualiza a medida que avanza el proyecto.
 
 ---
 
+## 2026-11-17 — `.env.example` movido a la raíz
+
+**Motivo:** Compose lee el archivo `.env` desde la raíz del proyecto, no desde `backend/`.
+Tener el ejemplo en `backend/` inducía a copiarlo en un lugar donde no tenía efecto.
+
+**Cambio:** `backend/.env.example` → `.env.example` en la raíz. Se actualizaron las
+instrucciones de `backend/README.md` y `README.md` raíz. El `frontend/.env.example` se mantiene
+para el desarrollo local con Vite.
+
+**Porqué:** el proyecto no necesita `.env` para funcionar; los valores por defecto están en
+`docker-compose.yml`. El ejemplo queda en el lugar correcto para quien quiera sobreescribirlos.
+
+**Impacto:** ninguno en runtime. El archivo es una plantilla, no una configuración activa.
+
+---
+
 ## 2026-11-17 — Onboarding fluido y guardrail de no protocolo contextual
 
 **Motivo:** el guardrail de “no protocolo” podía pisar respuestas naturales en preguntas
