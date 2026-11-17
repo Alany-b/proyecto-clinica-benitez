@@ -153,10 +153,13 @@ Para desarrollo local con HMR, seguir usando `npm run dev` (sección anterior).
 
 El backend habilita:
 
-- `http://localhost:5173`
-- `http://localhost:3000`
+- `http://localhost:5173` y `http://localhost:3000`.
+- Cualquier origen `http://localhost`, `http://127.0.0.1` o IP privada
+  (`10.x.x.x`, `172.16–31.x.x`, `192.168.x.x`) en cualquier puerto, mediante
+  `allow_origin_regex`.
 
-Si servís el frontend en otro origen, hay que agregarlo en `app/main.py` del backend.
+Esto cubre Vite en `5174` y el acceso desde la IP de WSL/LAN. Si servís el frontend en un
+dominio público, hay que agregarlo explícitamente en `backend/app/main.py`.
 
 ## Escenarios de prueba
 

@@ -7,6 +7,19 @@ Registro cronológico de modificaciones importantes, decisiones e incidencias de
 
 ---
 
+## 2026-11-17 — CORS para desarrollo en `5174` e IP de WSL
+
+**Motivo:** al abrir la interfaz en `http://172.23.48.1:5174`, el navegador bloqueaba
+`/health` y `/api/chat` porque el backend solo permitía `localhost:5173` y `3000`.
+
+**Cambio:** el backend acepta ahora `localhost`, `127.0.0.1` e IP privadas en cualquier puerto
+mediante `allow_origin_regex`. No se modificó el frontend.
+
+**Validación:** E2E en `http://172.23.48.1:5174` → Online, `POST /api/chat` 200, sin errores
+CORS. El origen externo de prueba es rechazado.
+
+---
+
 ## 2026-11-16 — Integración con RAG proactivo
 
 **Cambio de backend:** la recuperación documental se ejecuta antes del modelo y los

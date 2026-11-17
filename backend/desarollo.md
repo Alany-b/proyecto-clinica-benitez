@@ -920,6 +920,34 @@ errores de consola y con ambos contenedores healthy.
 ollama create agente-clinica -f backend/Modelfile
 ```
 
+### CORS para desarrollo en puertos alternativos e IP local (2026-11-17)
+
+**Problema:** al abrir el frontend de desarrollo en `http://172.23.48.1:5174`, el navegador
+bloqueaba `/health` y `/api/chat` porque el backend solo permitía `localhost:5173` y
+`localhost:3000`. Vite puede elegir `5174` si `5173` está ocupado, y WSL/LAN puede servir la
+interfaz desde una IP privada.
+
+**Solución:** además de `allow_origins`, se agregó `allow_origin_regex` para aceptar:
+
+- `http://localhost` y `http://127.0.0.1` en cualquier puerto.
+- IP privadas `10.x.x.x`, `172.16–31.x.x` y `192.168.x.x` en cualquier puerto.
+
+`allow_credentials` sigue en `False` porque no hay autenticación ni cookies.
+
+**Porqué:** el entorno de desarrollo cambia de puerto y de IP con facilidad; una lista fija de
+orígenes genera errores CORS intermitentes. La regex cubre el desarrollo local sin abrir CORS a
+dominios públicos. En producción debe restringirse a los dominios reales.
+
+**Validación:**
+
+- Preflight con `Origin: http://172.23.48.1:5174` → `200` y
+  `access-control-allow-origin` correcto.
+- Preflight con `http://localhost:5174` → `200`.
+- Preflight con `http://localhost:5173` → `200`.
+- Origen externo `http://evil.example` → `400` sin header CORS.
+- E2E en `http://172.23.48.1:5174`: estado **Online**, `POST /api/chat` `200` y respuesta con
+  horarios reales, sin errores CORS.
+
 ## Comandos ejecutados
 
 | Fecha | Comando | Resultado |
@@ -999,6 +1027,8 @@ ollama create agente-clinica -f backend/Modelfile
 | 2026-11-16 | Sanitización de nombres internos | ✅ Respuestas sin `buscar_protocolo`, `consultar_contacto_area` ni `derivar_solicitud`. |
 | 2026-11-16 | Validación backend de 5 escenarios + seguimiento | ✅ RAG, contacto, ambigüedad, emergencia, no protocolo y “Centro quirúrgico”. |
 | 2026-11-16 | E2E frontend con 5 escenarios + seguimiento | ✅ `UI_PROACTIVE_E2E_OK`; historial correcto y sin errores de consola. |
+| 2026-11-17 | CORS con `allow_origin_regex` para localhost/IP privada | ✅ Vite 5174 e IP WSL habilitados; origen externo rechazado. |
+| 2026-11-17 | E2E en `http://172.23.48.1:5174` | ✅ Online, `POST /api/chat` 200, sin errores CORS. |
 
 ## Librerías instaladas (requirements.txt)
 

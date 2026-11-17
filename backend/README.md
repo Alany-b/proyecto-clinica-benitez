@@ -285,6 +285,23 @@ docker compose run --rm api python -m app.rag.indexer
 
 ---
 
+## CORS y desarrollo desde otros orígenes
+
+El backend permite:
+
+- `http://localhost:5173` y `http://localhost:3000`.
+- Cualquier origen `http://localhost`, `http://127.0.0.1` o IP privada
+  (`10.x.x.x`, `172.16–31.x.x`, `192.168.x.x`) en cualquier puerto, mediante
+  `allow_origin_regex`.
+
+Esto permite usar Vite en un puerto alternativo (por ejemplo `5174`) o abrir la interfaz
+desde la IP de WSL/LAN sin recibir un error CORS. El backend no usa cookies ni credenciales,
+por lo que `allow_credentials` queda en `False`.
+
+> Para producción conviene restringir los orígenes a los dominios reales.
+
+---
+
 ## Estructura del backend
 
 ```

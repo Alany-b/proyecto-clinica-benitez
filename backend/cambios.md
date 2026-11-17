@@ -9,6 +9,28 @@ interfieren con el plan inicial. Se actualiza a medida que avanza el proyecto.
 
 ---
 
+## 2026-11-17 — CORS para Vite en puertos alternativos e IP de WSL/LAN
+
+**Motivo:** el frontend abierto en `http://172.23.48.1:5174` recibía errores CORS en
+`/health` y `/api/chat`; el backend solo permitía `localhost:5173` y `localhost:3000`.
+
+**Cambio:** `backend/app/main.py` mantiene `allow_origins` y agrega `allow_origin_regex` para
+aceptar `localhost`, `127.0.0.1` e IP privadas (`10.x`, `172.16–31.x`, `192.168.x`) en
+cualquier puerto. `allow_credentials=False`.
+
+**Porqué:** Vite puede cambiar a `5174` si `5173` está ocupado y el acceso desde Windows a WSL
+usa una IP privada. La regex evita errores intermitentes sin abrir CORS a dominios públicos.
+Para producción se deben restringir los orígenes reales.
+
+**Validación:**
+
+- Preflight `172.23.48.1:5174` → 200 + `access-control-allow-origin`.
+- Preflight `localhost:5174` → 200.
+- Origen externo → 400 sin header.
+- E2E en `172.23.48.1:5174`: Online, chat 200, sin errores CORS.
+
+---
+
 ## 2026-11-16 — RAG proactivo y fluidez conversacional
 
 **Motivo:** el modelo de 8B podía fallar al generar JSON con tildes para una búsqueda simple,
