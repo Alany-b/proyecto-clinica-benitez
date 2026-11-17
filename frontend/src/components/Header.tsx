@@ -8,6 +8,7 @@ interface HeaderProps {
   onNewChat: () => void;
   canReset: boolean;
   onToggleSidebar: () => void;
+  showSidebarToggle: boolean;
 }
 
 export function Header({
@@ -17,27 +18,30 @@ export function Header({
   onNewChat,
   canReset,
   onToggleSidebar,
+  showSidebarToggle,
 }: HeaderProps) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur">
       <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:px-6">
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 text-slate-300 transition hover:border-slate-700 hover:bg-slate-900 lg:hidden"
-          aria-label="Abrir escenarios de prueba"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            className="h-5 w-5"
-            aria-hidden="true"
+        {showSidebarToggle && (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 text-slate-300 transition hover:border-slate-700 hover:bg-slate-900 lg:hidden"
+            aria-label="Abrir escenarios de prueba"
           >
-            <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              className="h-5 w-5"
+              aria-hidden="true"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
 
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-400 to-cyan-600 text-sm font-bold text-slate-950 shadow-lg shadow-teal-500/20">
           CB

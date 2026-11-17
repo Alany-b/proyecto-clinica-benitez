@@ -3,7 +3,34 @@
 Registro cronológico de modificaciones importantes, decisiones e incidencias del frontend.
 
 - **Proyecto:** interfaz web del Agente Clínica Benitez.
-- **Última actualización:** 2026-11-13.
+- **Última actualización:** 2026-11-17.
+
+---
+
+## 2026-11-17 — Modo “Conversar con el agente” separado de los escenarios
+
+**Motivo:** el chat solo era accesible dentro de uno de los 5 escenarios de prueba. No había
+forma de mantener una conversación libre de varios turnos sin que un escenario reiniciara el
+historial.
+
+**Cambio:**
+
+- Se agregó `ModeTabs` con dos modos: **Conversar con el agente** (inicial) y **Escenarios de
+  prueba**.
+- `App` instancia dos `useChat` independientes: uno para el chat libre y otro para escenarios.
+  Cambiar de pestaña no pierde el historial de la otra.
+- En el modo de escenarios la barra lateral vuelve a mostrarse; en el chat libre se oculta y el
+  chat ocupa todo el ancho. El botón de menú del header solo aparece en escenarios.
+- `ChatWindow` recibió `emptyState` y `placeholder` para adaptar el estado vacío de cada modo.
+- “Nueva conversación” reinicia solo el modo visible.
+- El formulario de chat libre mantiene el historial; los escenarios siguen enviando
+  `fresh: true`.
+
+**Porqué:** separar la conversación real del banco de pruebas permite demostrar el asistente
+como producto y, a la vez, conservar los 5 casos guiados para la defensa sin mezclar contextos.
+
+**Validación:** `npm run typecheck` y `npm run build` OK; imagen Docker reconstruida y
+`clinica-benitez-frontend` healthy.
 
 ---
 

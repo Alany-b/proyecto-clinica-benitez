@@ -21,6 +21,18 @@ Todo corre de forma local: Ollama en el host y los servicios en contenedores.
 - **Guardrails:** sin diagnósticos ni recetas, sin contactos inventados, emergencia primero y
   derivación cuando corresponde.
 
+## Interfaz web
+
+La interfaz tiene dos modos separados con historial independiente:
+
+- **Conversar con el agente:** chat libre de múltiples turnos con el asistente, sin depender de
+  los escenarios. Es el modo inicial.
+- **Escenarios de prueba:** los 5 casos guiados de la izquierda (RAG, contacto, ambigüedad,
+  emergencia e información inexistente), que se envían con un clic.
+
+Cambiar de modo no borra la conversación: cada uno conserva su propio historial hasta que se
+presiona “Nueva conversación”.
+
 ## Arquitectura de despliegue
 
 - Un único `docker-compose.yml` en la raíz coordina `api` y `frontend`, con red compartida,

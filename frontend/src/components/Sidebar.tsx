@@ -8,7 +8,7 @@ interface Scenario {
   accent: Accent;
 }
 
-const SCENARIOS: Scenario[] = [
+export const SCENARIOS: Scenario[] = [
   {
     id: "rag",
     title: "Consulta RAG",

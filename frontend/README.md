@@ -18,11 +18,16 @@ utilizadas y cantidad de pasos.
 App
 ├── Header
 │   └── StatusIndicator        # GET /health (online / error / verificando)
+├── ModeTabs                   # Conversar (chat libre) / Escenarios de prueba
 ├── Sidebar                    # 5 escenarios de prueba en 1 clic
 └── ChatWindow
     ├── MessageBubble          # Markdown + badges de tools/pasos
     └── TypingIndicator
 ```
+
+`App` mantiene dos instancias de `useChat`: una para la conversación libre y otra para los
+escenarios. Al cambiar de pestaña no se borra el historial de la otra, y “Nueva conversación”
+reinicia solo el modo visible.
 
 Hooks:
 
@@ -161,6 +166,17 @@ El backend habilita:
 Esto cubre Vite en `5174` y el acceso desde la IP de WSL/LAN. Si servís el frontend en un
 dominio público, hay que agregarlo explícitamente en `backend/app/main.py`.
 
+## Modos de uso
+
+La interfaz abre en **Conversar con el agente**, un chat libre de múltiples turnos para hacer
+cualquier consulta administrativa sin elegir un escenario. El segundo modo, **Escenarios de
+prueba**, muestra la barra lateral con los 5 casos guiados y conserva un historial propio.
+
+| Modo | Qué muestra | Historial |
+|------|-------------|-----------|
+| Conversar con el agente | Chat a pantalla completa, con botón para pasar a los escenarios. | Propio y persistente entre turnos. |
+| Escenarios de prueba | Barra lateral con 5 casos + chat del escenario. | Se reinicia con cada escenario (`fresh`). |
+
 ## Escenarios de prueba
 
 | Escenario | Consulta | Resultado esperado |
@@ -173,7 +189,8 @@ dominio público, hay que agregarlo explícitamente en `backend/app/main.py`.
 
 > Cada escenario reinicia el historial y la vista del chat: no comparte contexto con el
 > escenario anterior. La consulta ambigua se resuelve con un guardrail determinista que pide
-> aclaración sin consultar Chroma.
+> aclaración sin consultar Chroma. Desde la misma pestaña también se puede escribir una consulta
+> manual de prueba, que sí mantiene el historial entre turnos.
 
 ## Solución de problemas
 

@@ -319,3 +319,39 @@ Resultado: `UI_PROACTIVE_E2E_OK`.
 **Porqué no se tocó el frontend:** el backend resolvió la recuperación y el contexto; la
 interfaz ya mostraba `herramientas_usadas` y `pasos`. Mantener el contrato evita romper los
 componentes y permite que el beneficio llegue sin migraciones.
+
+## Fase 5 — Chat libre y escenarios separados (2026-11-17)
+
+**Problema:** toda conversación nacía de uno de los 5 escenarios, que reinician el historial.
+No existía un lugar para hablar con el agente de forma continua.
+
+**Diseño:**
+
+- `ModeTabs` divide la interfaz en **Conversar con el agente** (modo inicial) y **Escenarios de
+  prueba**.
+- `App` crea dos instancias de `useChat` (`chat` y `scenarios`) para que cada modo conserve su
+  propio historial. Cambiar de pestaña no borra mensajes ni dispara peticiones.
+- En el modo de escenarios reaparece el `Sidebar` de 5 casos; en el chat libre se oculta y el
+  chat ocupa el ancho completo. El botón de menú del `Header` solo se muestra en escenarios.
+- `Sidebar` exporta `SCENARIOS` para que `ModeTabs` muestre la cantidad sin duplicar datos.
+- `ChatWindow` acepta `emptyState` (título, descripción, chips y acción opcional) y
+  `placeholder`, de modo que cada modo explica qué hacer.
+- El chat libre envía historial completo entre turnos; los escenarios mantienen
+  `{ fresh: true }` para no mezclar contexto.
+- “Nueva conversación” reinicia solo el modo visible.
+
+**Porqué dos instancias y no una:** mantener los historiales aislados evita que una consulta de
+prueba contamine la conversación real y permite cambiar de pestaña sin perder trabajo. Como el
+contrato `POST /api/chat` no cambia, el backend no se modifica.
+
+**Validación:**
+
+```powershell
+cd frontend
+npm run typecheck
+npm run build
+```
+
+Ambos comandos finalizaron sin errores; la imagen Docker se reconstruyó y
+`clinica-benitez-frontend` quedó healthy.
+
